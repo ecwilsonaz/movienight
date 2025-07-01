@@ -3,6 +3,7 @@ const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
 
 const app = express();
 const server = http.createServer(app);
@@ -15,12 +16,78 @@ const io = socketIo(server, {
 
 let sessionConfig = {};
 let adminSocket = null;
-let connectedClients = new Set();
+let connectedClients = new Map(); // Changed to Map to store client info
 let currentState = {
   isPlaying: false,
   currentTime: 0,
   lastUpdate: Date.now()
 };
+
+// Country code to flag emoji mapping
+const flagEmojis = {
+  'US': '🇺🇸', 'CA': '🇨🇦', 'GB': '🇬🇧', 'FR': '🇫🇷', 'DE': '🇩🇪', 'IT': '🇮🇹', 'ES': '🇪🇸',
+  'AU': '🇦🇺', 'JP': '🇯🇵', 'CN': '🇨🇳', 'IN': '🇮🇳', 'BR': '🇧🇷', 'MX': '🇲🇽', 'RU': '🇷🇺',
+  'KR': '🇰🇷', 'NL': '🇳🇱', 'SE': '🇸🇪', 'NO': '🇳🇴', 'DK': '🇩🇰', 'FI': '🇫🇮', 'CH': '🇨🇭',
+  'AT': '🇦🇹', 'BE': '🇧🇪', 'IE': '🇮🇪', 'PT': '🇵🇹', 'GR': '🇬🇷', 'PL': '🇵🇱', 'CZ': '🇨🇿',
+  'HU': '🇭🇺', 'RO': '🇷🇴', 'BG': '🇧🇬', 'HR': '🇭🇷', 'SI': '🇸🇮', 'SK': '🇸🇰', 'LT': '🇱🇹',
+  'LV': '🇱🇻', 'EE': '🇪🇪', 'TR': '🇹🇷', 'IL': '🇮🇱', 'SA': '🇸🇦', 'AE': '🇦🇪', 'EG': '🇪🇬',
+  'ZA': '🇿🇦', 'NG': '🇳🇬', 'KE': '🇰🇪', 'MA': '🇲🇦', 'TN': '🇹🇳', 'AR': '🇦🇷', 'CL': '🇨🇱',
+  'CO': '🇨🇴', 'PE': '🇵🇪', 'VE': '🇻🇪', 'UY': '🇺🇾', 'EC': '🇪🇨', 'BO': '🇧🇴', 'PY': '🇵🇾',
+  'TH': '🇹🇭', 'VN': '🇻🇳', 'MY': '🇲🇾', 'SG': '🇸🇬', 'ID': '🇮🇩', 'PH': '🇵🇭', 'TW': '🇹🇼',
+  'HK': '🇭🇰', 'NZ': '🇳🇿', 'PK': '🇵🇰', 'BD': '🇧🇩', 'LK': '🇱🇰', 'MM': '🇲🇲', 'KH': '🇰🇭',
+  'LA': '🇱🇦', 'NP': '🇳🇵', 'BT': '🇧🇹', 'MN': '🇲🇳', 'KZ': '🇰🇿', 'UZ': '🇺🇿', 'KG': '🇰🇬',
+  'TJ': '🇹🇯', 'TM': '🇹🇲', 'AF': '🇦🇫', 'IQ': '🇮🇶', 'IR': '🇮🇷', 'SY': '🇸🇾', 'LB': '🇱🇧',
+  'JO': '🇯🇴', 'PS': '🇵🇸', 'KW': '🇰🇼', 'QA': '🇶🇦', 'BH': '🇧🇭', 'OM': '🇴🇲', 'YE': '🇾🇪'
+};
+
+async function getGeolocation(ip) {
+  return new Promise((resolve) => {
+    // Skip geolocation for localhost/private IPs
+    if (ip === '127.0.0.1' || ip === '::1' || ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.')) {
+      resolve({ country: 'Local', city: 'Localhost', countryCode: 'LOCAL', flag: '🏠' });
+      return;
+    }
+
+    const options = {
+      hostname: 'ipapi.co',
+      port: 443,
+      path: `/${ip}/json/`,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'MovieNight/1.0'
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          const geoData = JSON.parse(data);
+          resolve({
+            country: geoData.country_name || 'Unknown',
+            city: geoData.city || 'Unknown',
+            countryCode: geoData.country_code || 'XX',
+            flag: flagEmojis[geoData.country_code] || '🌍'
+          });
+        } catch (e) {
+          resolve({ country: 'Unknown', city: 'Unknown', countryCode: 'XX', flag: '🌍' });
+        }
+      });
+    });
+
+    req.on('error', () => {
+      resolve({ country: 'Unknown', city: 'Unknown', countryCode: 'XX', flag: '🌍' });
+    });
+
+    req.setTimeout(3000, () => {
+      req.destroy();
+      resolve({ country: 'Unknown', city: 'Unknown', countryCode: 'XX', flag: '🌍' });
+    });
+
+    req.end();
+  });
+}
 
 function loadSessionConfig() {
   try {
@@ -32,6 +99,22 @@ function loadSessionConfig() {
     console.log('Please ensure session.json exists and is valid JSON');
     process.exit(1);
   }
+}
+
+function showCurrentViewers() {
+  console.log('\n📊 Current Viewers:');
+  if (connectedClients.size === 0) {
+    console.log('   No viewers connected');
+    return;
+  }
+  
+  const clients = Array.from(connectedClients.values());
+  clients.forEach((client, index) => {
+    const duration = Math.floor((Date.now() - client.connectedAt.getTime()) / 1000);
+    const role = client.isAdmin ? '👑 ADMIN' : '👥 VIEWER';
+    console.log(`   ${index + 1}. ${role} ${client.geo.flag} ${client.geo.city}, ${client.geo.country} (${duration}s)`);
+  });
+  console.log('');
 }
 
 loadSessionConfig();
@@ -249,18 +332,55 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
   res.send(html);
 });
 
-io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
-  connectedClients.add(socket);
+io.on('connection', async (socket) => {
+  const clientIP = socket.handshake.headers['x-forwarded-for'] || 
+                   socket.handshake.headers['x-real-ip'] || 
+                   socket.handshake.address || 
+                   socket.conn.remoteAddress || 
+                   '127.0.0.1';
+  
+  // Clean up IP (take first if multiple)
+  const cleanIP = clientIP.split(',')[0].trim();
+  
+  // Get geolocation
+  const geo = await getGeolocation(cleanIP);
+  
+  // Store client info
+  const clientInfo = {
+    id: socket.id,
+    ip: cleanIP,
+    isAdmin: false,
+    geo: geo,
+    connectedAt: new Date()
+  };
+  
+  connectedClients.set(socket.id, clientInfo);
+  
+  const viewerCount = connectedClients.size;
+  const adminCount = Array.from(connectedClients.values()).filter(c => c.isAdmin).length;
+  
+  console.log(`🟢 Client connected: ${socket.id.substring(0, 8)}... from ${geo.flag} ${geo.city}, ${geo.country}`);
+  console.log(`👥 Total viewers: ${viewerCount} (${adminCount} admin${adminCount !== 1 ? 's' : ''}, ${viewerCount - adminCount} viewer${viewerCount - adminCount !== 1 ? 's' : ''})`);
 
   socket.on('join', (data) => {
     if (data.isAdmin) {
       if (adminSocket) {
+        // Update old admin
+        const oldAdminInfo = connectedClients.get(adminSocket.id);
+        if (oldAdminInfo) {
+          oldAdminInfo.isAdmin = false;
+        }
         adminSocket.isAdmin = false;
       }
       adminSocket = socket;
       socket.isAdmin = true;
-      console.log('Admin connected:', socket.id);
+      
+      // Update client info
+      const clientInfo = connectedClients.get(socket.id);
+      if (clientInfo) {
+        clientInfo.isAdmin = true;
+        console.log(`👑 Admin role assigned to: ${socket.id.substring(0, 8)}... from ${clientInfo.geo.flag} ${clientInfo.geo.city}, ${clientInfo.geo.country}`);
+      }
     } else {
       // Late joiner sync: send current state to new viewers
       if (adminSocket && currentState.isPlaying) {
@@ -300,7 +420,10 @@ io.on('connection', (socket) => {
       currentState.lastUpdate = Date.now();
       
       socket.broadcast.emit('control', data);
-      console.log('Admin control:', data.type, 'at', data.currentTime);
+      
+      const clientInfo = connectedClients.get(socket.id);
+      const flag = clientInfo ? clientInfo.geo.flag : '👑';
+      console.log(`🎬 Admin control: ${data.type} at ${data.currentTime.toFixed(1)}s ${flag}`);
     }
   });
 
@@ -316,20 +439,52 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
-    connectedClients.delete(socket);
+    const clientInfo = connectedClients.get(socket.id);
+    const wasAdmin = socket === adminSocket;
     
-    if (socket === adminSocket) {
+    if (clientInfo) {
+      console.log(`🔴 Client disconnected: ${socket.id.substring(0, 8)}... from ${clientInfo.geo.flag} ${clientInfo.geo.city}, ${clientInfo.geo.country}`);
+      connectedClients.delete(socket.id);
+    } else {
+      console.log(`🔴 Client disconnected: ${socket.id.substring(0, 8)}...`);
+    }
+    
+    if (wasAdmin) {
       adminSocket = null;
       io.emit('adminStatus', { hasAdmin: false });
-      console.log('Admin disconnected');
+      console.log('👑 Admin disconnected');
     }
+    
+    const viewerCount = connectedClients.size;
+    const adminCount = Array.from(connectedClients.values()).filter(c => c.isAdmin).length;
+    console.log(`👥 Total viewers: ${viewerCount} (${adminCount} admin${adminCount !== 1 ? 's' : ''}, ${viewerCount - adminCount} viewer${viewerCount - adminCount !== 1 ? 's' : ''})`);
   });
+});
+
+// Add keyboard commands for server management
+process.stdin.setRawMode(true);
+process.stdin.resume();
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (key) => {
+  if (key === '\u0003') { // Ctrl+C
+    console.log('\n👋 Shutting down server...');
+    process.exit();
+  } else if (key === 'v' || key === 'V') {
+    showCurrentViewers();
+  } else if (key === 'h' || key === 'H') {
+    console.log('\n⌨️  Keyboard Commands:');
+    console.log('   V - Show current viewers');
+    console.log('   H - Show this help');
+    console.log('   Ctrl+C - Quit server\n');
+  }
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Session URL: http://localhost:${PORT}/${sessionConfig.slug}`);
-  console.log(`Admin URL: http://localhost:${PORT}/${sessionConfig.slug}?admin`);
+  console.log(`🎬 MovieNight Server Started`);
+  console.log(`📡 Running on port ${PORT}`);
+  console.log(`🔗 Session URL: http://localhost:${PORT}/${sessionConfig.slug}`);
+  console.log(`👑 Admin URL: http://localhost:${PORT}/${sessionConfig.slug}?admin`);
+  console.log(`⌨️  Press 'V' to view connected users, 'H' for help`);
+  console.log('─'.repeat(60));
 });
