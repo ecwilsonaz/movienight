@@ -49,14 +49,17 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
     <style>
         body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
         video { max-width: 100%; max-height: 100vh; }
+        ${!isAdmin ? 'video { pointer-events: none; }' : ''}
         .status { position: fixed; top: 10px; right: 10px; color: white; font-family: monospace; background: rgba(0,0,0,0.7); padding: 5px; }
+        ${!isAdmin ? '.viewer-notice { position: fixed; bottom: 10px; left: 10px; color: #888; font-family: monospace; font-size: 12px; }' : ''}
     </style>
 </head>
 <body>
-    <video id="video" controls autoplay muted crossorigin="anonymous">
+    <video id="video" ${isAdmin ? 'controls' : ''} autoplay muted crossorigin="anonymous">
         <source src="${sessionConfig.videoUrl}" type="video/webm">
     </video>
     <div id="status" class="status">${isAdmin ? 'ADMIN' : 'VIEWER'}</div>
+    ${!isAdmin ? '<div class="viewer-notice">Playback controlled by admin</div>' : ''}
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
@@ -67,6 +70,44 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         let syncInProgress = false;
 
         socket.emit('join', { isAdmin, startTime: ${sessionConfig.startTime} });
+
+        // Prevent viewer interactions
+        if (!isAdmin) {
+            video.addEventListener('play', (e) => {
+                if (!syncInProgress) {
+                    e.preventDefault();
+                    video.pause();
+                }
+            });
+            
+            video.addEventListener('pause', (e) => {
+                if (!syncInProgress) {
+                    e.preventDefault();
+                    video.play();
+                }
+            });
+            
+            video.addEventListener('seeking', (e) => {
+                if (!syncInProgress) {
+                    e.preventDefault();
+                    return false;
+                }
+            });
+            
+            video.addEventListener('volumechange', (e) => {
+                // Allow volume changes for viewers
+            });
+            
+            // Disable context menu to prevent right-click controls
+            video.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+            });
+            
+            // Disable keyboard shortcuts
+            video.addEventListener('keydown', (e) => {
+                e.preventDefault();
+            });
+        }
 
         if (isAdmin) {
             video.addEventListener('play', () => {
