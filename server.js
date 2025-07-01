@@ -155,7 +155,8 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         const socket = io();
         const video = document.getElementById('video');
         const status = document.getElementById('status');
-        const isAdmin = ${isAdmin};
+        const originallyAdmin = ${isAdmin}; // Store original admin intent
+        let isAdmin = ${isAdmin};
         let lastHeartbeat = Date.now();
         let syncInProgress = false;
 
@@ -320,8 +321,46 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             }
         });
 
+        socket.on('adminDenied', (data) => {
+            console.log('Admin access denied:', data.reason);
+            status.textContent = 'VIEWER - Admin Active';
+            
+            // Show notification to user
+            const notice = document.querySelector('.viewer-notice');
+            if (notice) {
+                notice.textContent = \`Admin active from \${data.adminLocation}\`;
+                notice.style.color = '#ff6b6b';
+            }
+            
+            // Override the isAdmin flag since server denied admin access
+            isAdmin = false;
+        });
+
+        socket.on('adminGranted', (data) => {
+            console.log('Admin access granted:', data.message);
+            isAdmin = true;
+            status.textContent = 'ADMIN';
+            
+            // Update notice
+            const notice = document.querySelector('.viewer-notice');
+            if (notice) {
+                notice.textContent = 'You are now the admin';
+                notice.style.color = '#4ecdc4';
+            }
+        });
+
         socket.on('adminStatus', (data) => {
-            status.textContent = isAdmin ? 'ADMIN' : (data.hasAdmin ? 'VIEWER' : 'NO ADMIN');
+            if (!isAdmin) {
+                status.textContent = data.hasAdmin ? 'VIEWER' : 'VIEWER - No Admin';
+                
+                // If admin disconnected and this was an admin URL, try to become admin
+                if (!data.hasAdmin && originallyAdmin) {
+                    console.log('Admin disconnected, attempting to claim admin role...');
+                    socket.emit('join', { isAdmin: true, startTime: ${sessionConfig.startTime} });
+                }
+            } else {
+                status.textContent = 'ADMIN';
+            }
         });
 
         socket.on('connect', () => {
@@ -370,22 +409,37 @@ io.on('connection', async (socket) => {
 
   socket.on('join', (data) => {
     if (data.isAdmin) {
-      if (adminSocket) {
-        // Update old admin
-        const oldAdminInfo = connectedClients.get(adminSocket.id);
-        if (oldAdminInfo) {
-          oldAdminInfo.isAdmin = false;
+      // Check if admin slot is already taken by an active connection
+      if (adminSocket && adminSocket.connected) {
+        // Admin slot is taken - deny admin privileges
+        const adminInfo = connectedClients.get(adminSocket.id);
+        const clientInfo = connectedClients.get(socket.id);
+        
+        socket.emit('adminDenied', { 
+          reason: 'Admin already active',
+          adminLocation: adminInfo ? `${adminInfo.geo.flag} ${adminInfo.geo.city}, ${adminInfo.geo.country}` : 'Unknown location'
+        });
+        
+        console.log(`❌ Admin denied: ${socket.id.substring(0, 8)}... from ${clientInfo ? clientInfo.geo.flag + ' ' + clientInfo.geo.city : 'Unknown'} - slot taken by ${adminSocket.id.substring(0, 8)}...`);
+        
+        // Continue as regular viewer (don't set isAdmin)
+        socket.isAdmin = false;
+      } else {
+        // No active admin - grant admin privileges
+        adminSocket = socket;
+        socket.isAdmin = true;
+        
+        // Update client info
+        const clientInfo = connectedClients.get(socket.id);
+        if (clientInfo) {
+          clientInfo.isAdmin = true;
+          console.log(`👑 Admin granted to: ${socket.id.substring(0, 8)}... from ${clientInfo.geo.flag} ${clientInfo.geo.city}, ${clientInfo.geo.country}`);
         }
-        adminSocket.isAdmin = false;
-      }
-      adminSocket = socket;
-      socket.isAdmin = true;
-      
-      // Update client info
-      const clientInfo = connectedClients.get(socket.id);
-      if (clientInfo) {
-        clientInfo.isAdmin = true;
-        console.log(`👑 Admin role assigned to: ${socket.id.substring(0, 8)}... from ${clientInfo.geo.flag} ${clientInfo.geo.city}, ${clientInfo.geo.country}`);
+        
+        // Notify client they got admin
+        socket.emit('adminGranted', { 
+          message: 'You are now the admin' 
+        });
       }
     } else {
       // Late joiner sync: send current state to new viewers
@@ -458,7 +512,7 @@ io.on('connection', async (socket) => {
     if (wasAdmin) {
       adminSocket = null;
       io.emit('adminStatus', { hasAdmin: false });
-      console.log('👑 Admin disconnected');
+      console.log('👑 Admin slot now available');
     }
     
     const viewerCount = connectedClients.size;
