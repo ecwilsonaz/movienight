@@ -1,0 +1,20 @@
+{
+  "name": "movienight",
+  "version": "1.0.0",
+  "description": "Ultra-minimal watch party for synchronized video viewing",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": ["watch-party", "video", "sync"],
+  "author": "",
+  "license": "MIT"
+}
