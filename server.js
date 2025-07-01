@@ -64,23 +64,27 @@ async function getGeolocation(ip) {
       res.on('end', () => {
         try {
           const geoData = JSON.parse(data);
+          console.log(`🔍 Geolocation API response for ${ip}:`, JSON.stringify(geoData, null, 2));
           resolve({
             country: geoData.country_name || 'Unknown',
-            city: geoData.city || 'Unknown',
+            city: geoData.city || 'Unknown', 
             countryCode: geoData.country_code || 'XX',
             flag: flagEmojis[geoData.country_code] || '🌍'
           });
         } catch (e) {
+          console.log(`❌ Geolocation API parse error for ${ip}:`, e.message, 'Raw data:', data);
           resolve({ country: 'Unknown', city: 'Unknown', countryCode: 'XX', flag: '🌍' });
         }
       });
     });
 
-    req.on('error', () => {
+    req.on('error', (error) => {
+      console.log(`❌ Geolocation API network error for ${ip}:`, error.message);
       resolve({ country: 'Unknown', city: 'Unknown', countryCode: 'XX', flag: '🌍' });
     });
 
     req.setTimeout(3000, () => {
+      console.log(`⏰ Geolocation API timeout for ${ip}`);
       req.destroy();
       resolve({ country: 'Unknown', city: 'Unknown', countryCode: 'XX', flag: '🌍' });
     });
