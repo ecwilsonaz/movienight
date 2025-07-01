@@ -16,6 +16,11 @@ const io = socketIo(server, {
 let sessionConfig = {};
 let adminSocket = null;
 let connectedClients = new Set();
+let currentState = {
+  isPlaying: false,
+  currentTime: 0,
+  lastUpdate: Date.now()
+};
 
 function loadSessionConfig() {
   try {
@@ -113,6 +118,22 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             lastHeartbeat = Date.now();
         });
 
+        socket.on('syncState', (data) => {
+            if (!isAdmin && !syncInProgress) {
+                syncInProgress = true;
+                console.log('Late joiner sync:', data.type, 'at', data.currentTime);
+                
+                video.currentTime = data.currentTime;
+                if (data.isPlaying) {
+                    video.play();
+                } else {
+                    video.pause();
+                }
+                
+                setTimeout(() => { syncInProgress = false; }, 200);
+            }
+        });
+
         socket.on('adminStatus', (data) => {
             status.textContent = isAdmin ? 'ADMIN' : (data.hasAdmin ? 'VIEWER' : 'NO ADMIN');
         });
@@ -143,6 +164,31 @@ io.on('connection', (socket) => {
       adminSocket = socket;
       socket.isAdmin = true;
       console.log('Admin connected:', socket.id);
+    } else {
+      // Late joiner sync: send current state to new viewers
+      if (adminSocket && currentState.isPlaying) {
+        // Calculate current time based on when state was last updated
+        const timeSinceUpdate = (Date.now() - currentState.lastUpdate) / 1000;
+        const syncTime = currentState.currentTime + timeSinceUpdate;
+        
+        setTimeout(() => {
+          socket.emit('syncState', {
+            type: 'play',
+            currentTime: syncTime,
+            isPlaying: currentState.isPlaying
+          });
+          console.log('Late joiner sync:', socket.id, 'to time', syncTime);
+        }, 500); // Small delay to ensure video loads first
+      } else if (adminSocket && !currentState.isPlaying) {
+        setTimeout(() => {
+          socket.emit('syncState', {
+            type: 'pause',
+            currentTime: currentState.currentTime,
+            isPlaying: currentState.isPlaying
+          });
+          console.log('Late joiner sync (paused):', socket.id, 'to time', currentState.currentTime);
+        }, 500);
+      }
     }
     
     socket.emit('adminStatus', { hasAdmin: !!adminSocket });
@@ -151,6 +197,11 @@ io.on('connection', (socket) => {
 
   socket.on('control', (data) => {
     if (socket.isAdmin) {
+      // Update server state tracking
+      currentState.currentTime = data.currentTime;
+      currentState.isPlaying = (data.type === 'play');
+      currentState.lastUpdate = Date.now();
+      
       socket.broadcast.emit('control', data);
       console.log('Admin control:', data.type, 'at', data.currentTime);
     }
@@ -158,6 +209,11 @@ io.on('connection', (socket) => {
 
   socket.on('heartbeat', (data) => {
     if (socket.isAdmin) {
+      // Update server state from heartbeat
+      currentState.currentTime = data.currentTime;
+      currentState.isPlaying = true; // heartbeat only sent when playing
+      currentState.lastUpdate = Date.now();
+      
       socket.broadcast.emit('heartbeat', data);
     }
   });
