@@ -70,7 +70,6 @@ async function getGeolocation(ip) {
       res.on('end', () => {
         try {
           const geoData = JSON.parse(data);
-          console.log(`🔍 Geolocation API response for ${cleanIP} (original: ${ip}):`, JSON.stringify(geoData, null, 2));
           resolve({
             country: geoData.country_name || 'Unknown',
             city: geoData.city || 'Unknown', 
@@ -78,19 +77,16 @@ async function getGeolocation(ip) {
             flag: flagEmojis[geoData.country_code] || '🌍'
           });
         } catch (e) {
-          console.log(`❌ Geolocation API parse error for ${cleanIP} (original: ${ip}):`, e.message, 'Raw data:', data);
           resolve({ country: 'Unknown', city: 'Unknown', countryCode: 'XX', flag: '🌍' });
         }
       });
     });
 
     req.on('error', (error) => {
-      console.log(`❌ Geolocation API network error for ${cleanIP} (original: ${ip}):`, error.message);
       resolve({ country: 'Unknown', city: 'Unknown', countryCode: 'XX', flag: '🌍' });
     });
 
     req.setTimeout(3000, () => {
-      console.log(`⏰ Geolocation API timeout for ${cleanIP} (original: ${ip})`);
       req.destroy();
       resolve({ country: 'Unknown', city: 'Unknown', countryCode: 'XX', flag: '🌍' });
     });
