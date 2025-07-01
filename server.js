@@ -49,13 +49,14 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
     <style>
         body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
         video { max-width: 100%; max-height: 100vh; }
-        ${!isAdmin ? 'video { pointer-events: none; }' : ''}
+        ${!isAdmin ? 'video::-webkit-media-controls-play-button, video::-webkit-media-controls-start-playback-button { display: none !important; }' : ''}
+        ${!isAdmin ? 'video::-webkit-media-controls-timeline { pointer-events: none !important; }' : ''}
         .status { position: fixed; top: 10px; right: 10px; color: white; font-family: monospace; background: rgba(0,0,0,0.7); padding: 5px; }
         ${!isAdmin ? '.viewer-notice { position: fixed; bottom: 10px; left: 10px; color: #888; font-family: monospace; font-size: 12px; }' : ''}
     </style>
 </head>
 <body>
-    <video id="video" ${isAdmin ? 'controls' : ''} autoplay muted crossorigin="anonymous">
+    <video id="video" controls autoplay muted crossorigin="anonymous">
         <source src="${sessionConfig.videoUrl}" type="video/webm">
     </video>
     <div id="status" class="status">${isAdmin ? 'ADMIN' : 'VIEWER'}</div>
@@ -71,31 +72,60 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
 
         socket.emit('join', { isAdmin, startTime: ${sessionConfig.startTime} });
 
-        // Prevent viewer interactions
+        // Prevent viewer interactions while preserving volume controls
         if (!isAdmin) {
+            let lastValidTime = 0;
+            let wasPlaying = false;
+            
             video.addEventListener('play', (e) => {
                 if (!syncInProgress) {
-                    e.preventDefault();
-                    video.pause();
+                    console.log('Viewer attempted to play - blocked');
+                    setTimeout(() => {
+                        if (wasPlaying) {
+                            video.play();
+                        } else {
+                            video.pause();
+                        }
+                        video.currentTime = lastValidTime;
+                    }, 1);
                 }
             });
             
             video.addEventListener('pause', (e) => {
                 if (!syncInProgress) {
-                    e.preventDefault();
-                    video.play();
+                    console.log('Viewer attempted to pause - blocked');
+                    setTimeout(() => {
+                        if (wasPlaying) {
+                            video.play();
+                        } else {
+                            video.pause();
+                        }
+                        video.currentTime = lastValidTime;
+                    }, 1);
                 }
             });
             
             video.addEventListener('seeking', (e) => {
                 if (!syncInProgress) {
-                    e.preventDefault();
-                    return false;
+                    console.log('Viewer attempted to seek - blocked');
+                    setTimeout(() => {
+                        video.currentTime = lastValidTime;
+                    }, 1);
                 }
             });
             
-            video.addEventListener('volumechange', (e) => {
-                // Allow volume changes for viewers
+            video.addEventListener('seeked', (e) => {
+                if (!syncInProgress) {
+                    video.currentTime = lastValidTime;
+                }
+            });
+            
+            // Track legitimate state changes
+            video.addEventListener('timeupdate', (e) => {
+                if (syncInProgress) {
+                    lastValidTime = video.currentTime;
+                    wasPlaying = !video.paused;
+                }
             });
             
             // Disable context menu to prevent right-click controls
@@ -103,8 +133,13 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 e.preventDefault();
             });
             
-            // Disable keyboard shortcuts
+            // Disable most keyboard shortcuts but allow volume keys
             video.addEventListener('keydown', (e) => {
+                // Allow arrow up/down for volume
+                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                    return; // Allow volume control
+                }
+                // Block everything else (space, arrow left/right, etc.)
                 e.preventDefault();
             });
         }
@@ -143,7 +178,14 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                     video.currentTime = data.currentTime;
                 }
                 
-                setTimeout(() => { syncInProgress = false; }, 100);
+                setTimeout(() => { 
+                    syncInProgress = false;
+                    // Update tracking variables for viewers
+                    if (!isAdmin) {
+                        lastValidTime = video.currentTime;
+                        wasPlaying = !video.paused;
+                    }
+                }, 100);
             }
         });
 
@@ -153,7 +195,14 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 if (timeDiff > 0.5 && !video.paused) {
                     syncInProgress = true;
                     video.currentTime = data.currentTime;
-                    setTimeout(() => { syncInProgress = false; }, 100);
+                    setTimeout(() => { 
+                        syncInProgress = false;
+                        // Update tracking variables for viewers
+                        if (!isAdmin) {
+                            lastValidTime = video.currentTime;
+                            wasPlaying = !video.paused;
+                        }
+                    }, 100);
                 }
             }
             lastHeartbeat = Date.now();
@@ -171,7 +220,14 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                     video.pause();
                 }
                 
-                setTimeout(() => { syncInProgress = false; }, 200);
+                setTimeout(() => { 
+                    syncInProgress = false;
+                    // Update tracking variables for viewers
+                    if (!isAdmin) {
+                        lastValidTime = video.currentTime;
+                        wasPlaying = !video.paused;
+                    }
+                }, 200);
             }
         });
 
