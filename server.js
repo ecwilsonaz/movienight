@@ -556,6 +556,20 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 pendingSync = data;
                 return;
             }
+            
+            // iOS Safari buffer awareness - delay sync if buffering
+            if (isIOSSafari && isBuffering) {
+                console.log('iOS Safari: Delaying sync - video is buffering');
+                setTimeout(() => applySync(data, customSettings), 500);
+                return;
+            }
+            
+            // iOS Safari ready state check - ensure video is ready for operations
+            if (isIOSSafari && video.readyState < 2) {
+                console.log(\`iOS Safari: Delaying sync - low ready state (\${video.readyState})\`);
+                setTimeout(() => applySync(data, customSettings), 300);
+                return;
+            }
 
             let settings = customSettings || getAdaptiveSettings();
             let attempts = 0;
@@ -569,6 +583,16 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                     tolerance: Math.max(settings.tolerance, 1.5)  // Higher tolerance for unpause
                 };
                 console.log('iOS Safari unpause: using reduced retry settings');
+                
+                // Additional buffer check for unpause
+                if (video.buffered.length > 0) {
+                    const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+                    const bufferAhead = bufferedEnd - data.currentTime;
+                    if (bufferAhead < 2) {
+                        console.log(\`iOS Safari unpause: Low buffer (\${bufferAhead.toFixed(1)}s) - increasing tolerance\`);
+                        settings.tolerance = Math.max(settings.tolerance, 2.0);
+                    }
+                }
             }
             
             const trySync = () => {
@@ -779,6 +803,156 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 e.preventDefault();
             });
         }
+
+        // Buffer state monitoring (iOS Safari specific issues)
+        let isBuffering = false;
+        let bufferStartTime = null;
+        
+        video.addEventListener('waiting', (e) => {
+            if (!isBuffering) {
+                isBuffering = true;
+                bufferStartTime = Date.now();
+                console.log(\`📡 Video buffering started (\${browser})\`);
+                
+                // Update status to show buffering
+                if (isIOSSafari) {
+                    status.textContent = (isAdmin ? 'ADMIN' : 'VIEWER') + ' 🔄';
+                }
+            }
+        });
+        
+        video.addEventListener('canplay', (e) => {
+            if (isBuffering) {
+                const bufferDuration = Date.now() - bufferStartTime;
+                isBuffering = false;
+                console.log(\`✅ Video buffering ended after \${bufferDuration}ms (\${browser})\`);
+                
+                // Restore normal status indicator
+                if (isIOSSafari) {
+                    updateConnectionIndicator();
+                }
+            }
+        });
+        
+        video.addEventListener('stalled', (e) => {
+            console.log(\`⚠️ Video stalled - network issues detected (\${browser})\`);
+            
+            // iOS Safari may need special handling for stalled playback
+            if (isIOSSafari && !video.paused) {
+                console.log('iOS Safari: Attempting to recover from stalled playback');
+                // Don't auto-retry immediately - let iOS handle it
+            }
+        });
+        
+        // Power management events (iOS Safari background/foreground handling)
+        video.addEventListener('suspend', (e) => {
+            console.log(\`🔋 Video suspended - iOS power management (\${browser})\`);
+            
+            if (isIOSSafari) {
+                // iOS has suspended video loading - sync may be affected
+                console.log('iOS Safari: Video loading suspended, sync delays expected');
+            }
+        });
+        
+        video.addEventListener('progress', (e) => {
+            // Monitor loading progress - iOS Safari may have different patterns
+            if (isIOSSafari && video.buffered.length > 0) {
+                const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+                const currentTime = video.currentTime;
+                const bufferAhead = bufferedEnd - currentTime;
+                
+                // Log when buffer gets low on iOS Safari
+                if (bufferAhead < 5 && !video.paused) {
+                    console.log(\`iOS Safari low buffer: \${bufferAhead.toFixed(1)}s ahead\`);
+                }
+            }
+        });
+        
+        // Document visibility change (iOS Safari background tab handling)
+        document.addEventListener('visibilitychange', () => {
+            if (isIOSSafari) {
+                if (document.hidden) {
+                    console.log('iOS Safari: Tab went to background - video may be throttled');
+                } else {
+                    console.log('iOS Safari: Tab returned to foreground - checking video state');
+                    
+                    // Check if video state is still valid after returning from background
+                    setTimeout(() => {
+                        if (!video.paused && video.readyState < 3) {
+                            console.log('iOS Safari: Video not ready after background return');
+                        }
+                    }, 100);
+                }
+            }
+        });
+        
+        // Ready state monitoring (video pipeline readiness)
+        let lastReadyState = video.readyState;
+        
+        video.addEventListener('readystatechange', (e) => {
+            const readyStates = ['HAVE_NOTHING', 'HAVE_METADATA', 'HAVE_CURRENT_DATA', 'HAVE_FUTURE_DATA', 'HAVE_ENOUGH_DATA'];
+            const oldState = readyStates[lastReadyState] || lastReadyState;
+            const newState = readyStates[video.readyState] || video.readyState;
+            
+            console.log(\`📹 Ready state: \${oldState} → \${newState} (\${browser})\`);
+            lastReadyState = video.readyState;
+            
+            // iOS Safari specific ready state handling
+            if (isIOSSafari) {
+                if (video.readyState >= 3 && isBuffering) {
+                    console.log('iOS Safari: Ready state indicates buffering should end');
+                }
+                
+                if (video.readyState < 2 && !video.paused) {
+                    console.log('iOS Safari: Low ready state during playback - potential issue');
+                }
+            }
+        });
+        
+        video.addEventListener('canplaythrough', (e) => {
+            console.log(\`🎬 Can play through - sufficient buffer (\${browser})\`);
+            
+            if (isIOSSafari) {
+                // iOS Safari should now have enough buffer for smooth playback
+                console.log('iOS Safari: Sufficient buffer for smooth playback');
+            }
+        });
+        
+        // Error recovery and edge case handling
+        video.addEventListener('error', (e) => {
+            const error = video.error;
+            console.log(\`❌ Video error: \${error ? error.message : 'Unknown error'} (\${browser})\`);
+            
+            if (isIOSSafari && error) {
+                console.log(\`iOS Safari error code: \${error.code}\`);
+                
+                // Common iOS Safari error recovery
+                if (error.code === 3) { // MEDIA_ERR_DECODE
+                    console.log('iOS Safari: Decode error - may need format fallback');
+                } else if (error.code === 2) { // MEDIA_ERR_NETWORK
+                    console.log('iOS Safari: Network error - checking connection');
+                }
+            }
+        });
+        
+        video.addEventListener('abort', (e) => {
+            console.log(\`⏹️ Video loading aborted (\${browser})\`);
+            
+            if (isIOSSafari) {
+                console.log('iOS Safari: Video loading was aborted - may need recovery');
+            }
+        });
+        
+        video.addEventListener('emptied', (e) => {
+            console.log(\`📰 Video emptied - media reset (\${browser})\`);
+            
+            if (isIOSSafari) {
+                console.log('iOS Safari: Video media was reset - checking for recovery');
+                // Reset buffer tracking
+                isBuffering = false;
+                bufferStartTime = null;
+            }
+        });
 
         if (isAdmin) {
             // Safari admin may need initial user interaction
