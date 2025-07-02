@@ -675,13 +675,11 @@ io.on('connection', async (socket) => {
   
   connectedClients.set(socket.id, clientInfo);
   
-  const viewerCount = connectedClients.size;
-  const adminCount = Array.from(connectedClients.values()).filter(c => c.isAdmin).length;
-  
   console.log(`🟢 Client connected: ${socket.id.substring(0, 8)}... from ${geo.flag} ${geo.city}, ${geo.country}`);
-  console.log(`👥 Total viewers: ${viewerCount} (${adminCount} admin${adminCount !== 1 ? 's' : ''}, ${viewerCount - adminCount} viewer${viewerCount - adminCount !== 1 ? 's' : ''})`);
 
   socket.on('join', (data) => {
+    console.log(`🔗 Join request: ${socket.id.substring(0, 8)}... requesting admin=${data.isAdmin}`);
+    
     if (data.isAdmin) {
       // Check if admin slot is already taken by an active connection
       if (adminSocket && adminSocket.connected) {
@@ -741,6 +739,11 @@ io.on('connection', async (socket) => {
         }, 1000);
       }
     }
+    
+    // Log updated connection counts after role assignment
+    const viewerCount = connectedClients.size;
+    const adminCount = Array.from(connectedClients.values()).filter(c => c.isAdmin).length;
+    console.log(`👥 Updated counts: ${viewerCount} total (${adminCount} admin${adminCount !== 1 ? 's' : ''}, ${viewerCount - adminCount} viewer${viewerCount - adminCount !== 1 ? 's' : ''})`);
     
     socket.emit('adminStatus', { hasAdmin: !!adminSocket });
     socket.broadcast.emit('adminStatus', { hasAdmin: !!adminSocket });
