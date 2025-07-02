@@ -11,7 +11,9 @@ const io = socketIo(server, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
-  }
+  },
+  transports: ['websocket', 'polling'],
+  allowEIO3: true
 });
 
 let sessionConfig = {};
@@ -625,7 +627,13 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         });
 
         socket.on('connect', () => {
-            console.log('✅ Connected to server');
+            console.log('✅ Connected to server, transport:', socket.io.engine.transport.name);
+            console.log('Socket ID:', socket.id);
+            
+            // Log transport changes
+            socket.io.engine.on('upgrade', () => {
+                console.log('Transport upgraded to:', socket.io.engine.transport.name);
+            });
             
             // Start network quality measurement
             measureNetworkQuality(); // Initial measurement
@@ -648,7 +656,7 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                     console.log('Current admin status after 2s:', isAdmin);
                     console.log('Status element text:', status.textContent);
                 }, 2000);
-            }, 100);
+            }, 500); // Increased delay for potential polling transport
         });
 
         socket.on('disconnect', () => {
@@ -668,6 +676,13 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
 });
 
 io.on('connection', async (socket) => {
+  console.log(`🔌 Socket.IO connection: ${socket.id.substring(0, 8)}... transport: ${socket.conn.transport.name}`);
+  
+  // Log transport upgrades
+  socket.conn.on('upgrade', () => {
+    console.log(`⬆️  Transport upgraded to: ${socket.conn.transport.name}`);
+  });
+  
   const clientIP = socket.handshake.headers['x-forwarded-for'] || 
                    socket.handshake.headers['x-real-ip'] || 
                    socket.handshake.address || 
