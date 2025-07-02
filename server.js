@@ -187,7 +187,8 @@ function showCurrentViewers() {
       }
     }
     
-    console.log(`   ${index + 1}. ${role} ${networkIndicator} ${client.geo.flag} ${client.geo.city}, ${client.geo.country} (${duration}s, ${rttText})${syncStatus}`);
+    const browserInfo = client.browser && client.videoFormat ? ` [${client.browser}/${client.videoFormat}]` : '';
+    console.log(`   ${index + 1}. ${role} ${networkIndicator} ${client.geo.flag} ${client.geo.city}, ${client.geo.country}${browserInfo} (${duration}s, ${rttText})${syncStatus}`);
   });
   
   // Summary with staleness awareness
@@ -832,7 +833,7 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 // If admin disconnected and this was an admin URL, try to become admin
                 if (!data.hasAdmin && originallyAdmin) {
                     console.log('Admin disconnected, attempting to claim admin role...');
-                    socket.emit('join', { isAdmin: true, startTime: ${sessionConfig.startTime} });
+                    socket.emit('join', { isAdmin: true, startTime: ${sessionConfig.startTime}, browser, videoFormat: optimalFormat });
                 }
             } else {
                 status.textContent = 'ADMIN';
@@ -871,7 +872,7 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             // Send join request after a brief delay to ensure server handlers are ready
             setTimeout(() => {
                 console.log('Client sending join request with isAdmin:', isAdmin);
-                socket.emit('join', { isAdmin, startTime: ${sessionConfig.startTime} });
+                socket.emit('join', { isAdmin, startTime: ${sessionConfig.startTime}, browser, videoFormat: optimalFormat });
                 
                 // Debug: Check if we get any admin-related response within 2 seconds
                 setTimeout(() => {
@@ -925,7 +926,9 @@ io.on('connection', async (socket) => {
     geo: geo,
     connectedAt: new Date(),
     networkQuality: 'good', // Track client network quality
-    lastRTT: 100
+    lastRTT: 100,
+    browser: 'unknown', // Will be updated when client joins
+    videoFormat: 'unknown' // Will be updated when client joins
   };
   
   connectedClients.set(socket.id, clientInfo);
@@ -954,7 +957,12 @@ io.on('connection', async (socket) => {
           adminLocation: adminInfo ? `${adminInfo.geo.flag} ${adminInfo.geo.city}, ${adminInfo.geo.country}` : 'Unknown location'
         });
         
-        console.log(`❌ Admin denied: ${socket.id.substring(0, 8)}... from ${clientInfo ? clientInfo.geo.flag + ' ' + clientInfo.geo.city : 'Unknown'} - slot taken by ${adminSocket.id.substring(0, 8)}...`);
+        // Update client info with browser/format for denied admin
+        if (clientInfo) {
+          clientInfo.browser = data.browser || 'unknown';
+          clientInfo.videoFormat = data.videoFormat || 'unknown';
+        }
+        console.log(`❌ Admin denied: ${socket.id.substring(0, 8)}... (${clientInfo ? clientInfo.browser + '/' + clientInfo.videoFormat : 'unknown/unknown'}) from ${clientInfo ? clientInfo.geo.flag + ' ' + clientInfo.geo.city : 'Unknown'} - slot taken by ${adminSocket.id.substring(0, 8)}...`);
         
         // Continue as regular viewer (don't set isAdmin)
         socket.isAdmin = false;
@@ -967,7 +975,9 @@ io.on('connection', async (socket) => {
         const clientInfo = connectedClients.get(socket.id);
         if (clientInfo) {
           clientInfo.isAdmin = true;
-          console.log(`👑 Admin granted to: ${socket.id.substring(0, 8)}... from ${clientInfo.geo.flag} ${clientInfo.geo.city}, ${clientInfo.geo.country}`);
+          clientInfo.browser = data.browser || 'unknown';
+          clientInfo.videoFormat = data.videoFormat || 'unknown';
+          console.log(`👑 Admin granted to: ${socket.id.substring(0, 8)}... (${clientInfo.browser}/${clientInfo.videoFormat}) from ${clientInfo.geo.flag} ${clientInfo.geo.city}, ${clientInfo.geo.country}`);
         }
         
         // Notify client they got admin
@@ -976,6 +986,13 @@ io.on('connection', async (socket) => {
         });
       }
     } else {
+      // Update client info for viewers
+      const clientInfo = connectedClients.get(socket.id);
+      if (clientInfo) {
+        clientInfo.browser = data.browser || 'unknown';
+        clientInfo.videoFormat = data.videoFormat || 'unknown';
+      }
+      
       // Late joiner sync: send current state to new viewers
       if (adminSocket && currentState.isPlaying) {
         // Calculate current time based on when state was last updated
