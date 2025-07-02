@@ -133,59 +133,84 @@ function showCurrentViewers() {
     const networkIndicator = networkEmojis[client.networkQuality] || '⚪';
     const rttText = client.lastRTT ? `${client.lastRTT}ms` : 'measuring...';
     
-    // Sync status for viewers
+    // Sync status for viewers (staleness-aware)
     let syncStatus = '';
     if (!client.isAdmin) {
       const viewerState = viewerStates.get(client.id);
       if (viewerState) {
-        // Calculate expected current time (same logic as sync detection)
-        let expectedTime = currentState.currentTime;
-        if (currentState.isPlaying) {
-          const timeSinceUpdate = (Date.now() - currentState.lastUpdate) / 1000;
-          expectedTime = currentState.currentTime + timeSinceUpdate;
-        }
+        const reportAge = (Date.now() - viewerState.lastUpdate) / 1000;
         
-        const timeDiff = Math.abs(viewerState.currentTime - expectedTime);
-        const playSync = viewerState.isPlaying === currentState.isPlaying;
-        const tolerance = viewerState.networkQuality === 'poor' ? 5.0 : 
-                         viewerState.networkQuality === 'fair' ? 3.0 : 2.0;
-        
-        if (timeDiff <= tolerance && playSync) {
-          syncStatus = ' ✅';
-        } else if (viewerState.buffering) {
-          syncStatus = ' 🔄';
+        if (reportAge > 6) {
+          // Very stale data
+          syncStatus = ` ❓ No data (${Math.floor(reportAge)}s ago)`;
+        } else if (reportAge > 3) {
+          // Stale data
+          syncStatus = ` ⏰ Stale (${Math.floor(reportAge)}s ago)`;
         } else {
-          syncStatus = ` ❌(${timeDiff.toFixed(1)}s)`;
+          // Fresh data - show actual sync status
+          if (viewerState.buffering) {
+            syncStatus = ' 🔄';
+          } else {
+            // Simple check: same play state and reasonable time difference
+            const playSync = viewerState.isPlaying === currentState.isPlaying;
+            const timeDiff = Math.abs(viewerState.currentTime - currentState.currentTime);
+            const tolerance = viewerState.networkQuality === 'poor' ? 5.0 : 
+                             viewerState.networkQuality === 'fair' ? 3.0 : 2.0;
+            
+            if (timeDiff <= tolerance && playSync) {
+              syncStatus = ' ✅';
+            } else {
+              syncStatus = ` ❌(${timeDiff.toFixed(1)}s)`;
+            }
+          }
         }
       } else {
-        syncStatus = ' ❓';
+        syncStatus = ' ❓ Never reported';
       }
     }
     
     console.log(`   ${index + 1}. ${role} ${networkIndicator} ${client.geo.flag} ${client.geo.city}, ${client.geo.country} (${duration}s, ${rttText})${syncStatus}`);
   });
   
-  // Summary
+  // Summary with staleness awareness
   const viewers = clients.filter(c => !c.isAdmin);
-  const inSync = viewers.filter(c => {
+  let freshInSync = 0;
+  let staleReports = 0;
+  let veryStale = 0;
+  let neverReported = 0;
+  
+  viewers.forEach(c => {
     const state = viewerStates.get(c.id);
-    if (!state) return false;
-    
-    // Calculate expected current time (same logic as sync detection)
-    let expectedTime = currentState.currentTime;
-    if (currentState.isPlaying) {
-      const timeSinceUpdate = (Date.now() - currentState.lastUpdate) / 1000;
-      expectedTime = currentState.currentTime + timeSinceUpdate;
+    if (!state) {
+      neverReported++;
+      return;
     }
     
-    const timeDiff = Math.abs(state.currentTime - expectedTime);
-    const tolerance = state.networkQuality === 'poor' ? 5.0 : 
-                     state.networkQuality === 'fair' ? 3.0 : 2.0;
-    return timeDiff <= tolerance && state.isPlaying === currentState.isPlaying;
+    const reportAge = (Date.now() - state.lastUpdate) / 1000;
+    
+    if (reportAge > 6) {
+      veryStale++;
+    } else if (reportAge > 3) {
+      staleReports++;
+    } else {
+      // Fresh data - check sync status
+      const playSync = state.isPlaying === currentState.isPlaying;
+      const timeDiff = Math.abs(state.currentTime - currentState.currentTime);
+      const tolerance = state.networkQuality === 'poor' ? 5.0 : 
+                       state.networkQuality === 'fair' ? 3.0 : 2.0;
+      
+      if (timeDiff <= tolerance && playSync && !state.buffering) {
+        freshInSync++;
+      }
+    }
   });
   
   if (viewers.length > 0) {
-    console.log(`\n   Sync Status: ${inSync.length}/${viewers.length} viewers in sync`);
+    let summary = `\n   Sync Status: ${freshInSync}/${viewers.length} confirmed in sync`;
+    if (staleReports > 0) summary += `, ${staleReports} stale`;
+    if (veryStale > 0) summary += `, ${veryStale} no recent data`;
+    if (neverReported > 0) summary += `, ${neverReported} never reported`;
+    console.log(summary);
   }
   console.log('');
 }
@@ -878,31 +903,22 @@ io.on('connection', async (socket) => {
         lastUpdate: Date.now()
       });
       
-      // Calculate expected current time (accounting for time progression since last update)
-      let expectedTime = currentState.currentTime;
-      if (currentState.isPlaying) {
-        const timeSinceUpdate = (Date.now() - currentState.lastUpdate) / 1000;
-        expectedTime = currentState.currentTime + timeSinceUpdate;
-      }
-      
-      // Check if viewer is out of sync
-      const timeDiff = Math.abs(data.currentTime - expectedTime);
+      // Simple sync check based on reported vs current state (no predictions)
+      const timeDiff = Math.abs(data.currentTime - currentState.currentTime);
       const playStateMismatch = data.isPlaying !== currentState.isPlaying;
-      const tolerance = data.networkQuality === 'poor' ? 5.0 : 
-                       data.networkQuality === 'fair' ? 3.0 : 2.0;
+      const tolerance = data.networkQuality === 'poor' ? 8.0 : 
+                       data.networkQuality === 'fair' ? 5.0 : 3.0;
       
-      // Only resync if significantly out of sync (increase tolerance to reduce false positives)
-      const resyncTolerance = tolerance * 2; // Double the tolerance for automatic resyncs
-      
-      if (timeDiff > resyncTolerance || playStateMismatch) {
+      // Only resync if significantly out of sync or play state mismatch
+      if (timeDiff > tolerance || playStateMismatch) {
         const clientInfo = connectedClients.get(socket.id);
         const flag = clientInfo ? clientInfo.geo.flag : '👥';
-        console.log(`⚠️  Viewer out of sync: ${flag} diff=${timeDiff.toFixed(1)}s (expected: ${expectedTime.toFixed(1)}, actual: ${data.currentTime.toFixed(1)}), play=${data.isPlaying}/${currentState.isPlaying}`);
+        console.log(`⚠️  Viewer out of sync: ${flag} diff=${timeDiff.toFixed(1)}s, play=${data.isPlaying}/${currentState.isPlaying}`);
         
-        // Send targeted resync with current expected time
+        // Send targeted resync with current state
         socket.emit('control', {
           type: currentState.isPlaying ? 'play' : 'pause',
-          currentTime: expectedTime,
+          currentTime: currentState.currentTime,
           isPlaying: currentState.isPlaying,
           commandId: Date.now() + '-resync-' + socket.id.substr(-4)
         });
