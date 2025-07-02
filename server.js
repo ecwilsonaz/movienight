@@ -592,11 +592,21 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 return;
             }
             
-            // iOS Safari power management - delay sync if suspended
+            // iOS Safari power management - delay sync if suspended (with emergency override)
             if (isIOSSafari && typeof videoSuspended !== 'undefined' && videoSuspended) {
-                console.log('iOS Safari: Delaying sync - video suspended by power management');
-                setTimeout(() => applySync(data, customSettings), 1000);
-                return;
+                // Emergency override: if drift is extreme (>15s), force sync anyway
+                const currentTime = video.currentTime || 0;
+                const timeDiff = Math.abs(data.currentTime - currentTime);
+                
+                if (timeDiff > 15) {
+                    console.log(\`iOS Safari: EMERGENCY SYNC - forcing through suspension (drift: \${timeDiff.toFixed(1)}s)\`);
+                    clearSuspensionState('emergency-override');
+                    // Continue with sync below
+                } else {
+                    console.log('iOS Safari: Delaying sync - video suspended by power management');
+                    setTimeout(() => applySync(data, customSettings), 1000);
+                    return;
+                }
             }
             
             // iOS Safari ready state check - ensure video is ready for operations
@@ -909,10 +919,9 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 }
             }
             
-            // Resume sync operations after suspension (will be defined in power management section)
-            if (isIOSSafari && typeof videoSuspended !== 'undefined' && videoSuspended) {
-                videoSuspended = false;
-                console.log('iOS Safari: Video ready after suspension, resuming sync operations');
+            // Resume sync operations after suspension
+            if (isIOSSafari && typeof clearSuspensionState !== 'undefined') {
+                clearSuspensionState('canplay');
             }
         });
         
@@ -928,13 +937,40 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         
         // Power management events (iOS Safari background/foreground handling)
         let videoSuspended = false;
+        let suspendedTimestamp = null;
+        let suspensionRecoveryTimer = null;
+        
+        function clearSuspensionState(reason) {
+            if (videoSuspended) {
+                videoSuspended = false;
+                suspendedTimestamp = null;
+                if (suspensionRecoveryTimer) {
+                    clearTimeout(suspensionRecoveryTimer);
+                    suspensionRecoveryTimer = null;
+                }
+                console.log(\`iOS Safari: Video suspension cleared (\${reason})\`);
+            }
+        }
         
         video.addEventListener('suspend', (e) => {
             console.log(\`🔋 Video suspended - iOS power management (\${browser})\`);
             
             if (isIOSSafari) {
                 videoSuspended = true;
+                suspendedTimestamp = Date.now();
                 console.log('iOS Safari: Video loading suspended, pausing sync operations');
+                
+                // Set recovery timeout - force resume after 5 seconds if no recovery event
+                if (suspensionRecoveryTimer) {
+                    clearTimeout(suspensionRecoveryTimer);
+                }
+                
+                suspensionRecoveryTimer = setTimeout(() => {
+                    if (videoSuspended) {
+                        console.log('iOS Safari: Suspension timeout - force resuming sync operations after 5s');
+                        clearSuspensionState('timeout');
+                    }
+                }, 5000);
             }
         });
         
@@ -961,8 +997,14 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 } else {
                     console.log('iOS Safari: Tab returned to foreground - checking video state');
                     
-                    // Check if video state is still valid after returning from background
+                    // Force clear suspension state when returning from background
                     setTimeout(() => {
+                        if (videoSuspended) {
+                            console.log('iOS Safari: Forcing suspension clear on foreground return');
+                            clearSuspensionState('visibility-foreground');
+                        }
+                        
+                        // Check if video state is still valid after returning from background
                         if (!video.paused && video.readyState < 3) {
                             console.log('iOS Safari: Video not ready after background return');
                         }
@@ -970,6 +1012,30 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 }
             }
         });
+        
+        // Additional iOS Safari suspension detection and recovery
+        if (isIOSSafari) {
+            // Monitor for stuck suspension state every 10 seconds
+            setInterval(() => {
+                if (videoSuspended && suspendedTimestamp) {
+                    const suspendedDuration = Date.now() - suspendedTimestamp;
+                    if (suspendedDuration > 10000) { // Suspended for more than 10 seconds
+                        console.log(\`iOS Safari: Suspension stuck for \${Math.round(suspendedDuration/1000)}s - force clearing\`);
+                        clearSuspensionState('stuck-detection');
+                    }
+                }
+            }, 10000);
+            
+            // Recovery trigger on any user interaction
+            ['touchstart', 'touchend', 'click', 'tap'].forEach(eventType => {
+                document.addEventListener(eventType, () => {
+                    if (videoSuspended) {
+                        console.log(\`iOS Safari: User interaction (\${eventType}) - clearing suspension\`);
+                        clearSuspensionState('user-interaction');
+                    }
+                }, { passive: true });
+            });
+        }
         
         // Ready state monitoring (video pipeline readiness)
         let lastReadyState = video.readyState;
@@ -1000,8 +1066,39 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             if (isIOSSafari) {
                 // iOS Safari should now have enough buffer for smooth playback
                 console.log('iOS Safari: Sufficient buffer for smooth playback');
+                
+                // Additional recovery point for suspended state
+                if (typeof clearSuspensionState !== 'undefined') {
+                    clearSuspensionState('canplaythrough');
+                }
             }
         });
+        
+        // Additional iOS Safari recovery events
+        if (isIOSSafari) {
+            video.addEventListener('loadeddata', (e) => {
+                clearSuspensionState('loadeddata');
+            });
+            
+            video.addEventListener('loadedmetadata', (e) => {
+                clearSuspensionState('loadedmetadata');
+            });
+            
+            video.addEventListener('playing', (e) => {
+                clearSuspensionState('playing');
+            });
+            
+            // Throttled timeupdate recovery to avoid spam
+            let lastTimeUpdateRecovery = 0;
+            video.addEventListener('timeupdate', (e) => {
+                // If we're getting timeupdate events, video is definitely not suspended
+                const now = Date.now();
+                if (videoSuspended && now - lastTimeUpdateRecovery > 1000) {
+                    lastTimeUpdateRecovery = now;
+                    clearSuspensionState('timeupdate');
+                }
+            });
+        }
         
         // Error recovery and edge case handling
         video.addEventListener('error', (e) => {
