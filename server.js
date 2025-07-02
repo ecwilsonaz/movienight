@@ -118,7 +118,18 @@ function showCurrentViewers() {
   clients.forEach((client, index) => {
     const duration = Math.floor((Date.now() - client.connectedAt.getTime()) / 1000);
     const role = client.isAdmin ? '👑 ADMIN' : '👥 VIEWER';
-    console.log(`   ${index + 1}. ${role} ${client.geo.flag} ${client.geo.city}, ${client.geo.country} (${duration}s)`);
+    
+    // Network quality indicator
+    const networkEmojis = {
+      'excellent': '🟢',
+      'good': '🟡', 
+      'fair': '🟠',
+      'poor': '🔴'
+    };
+    const networkIndicator = networkEmojis[client.networkQuality] || '⚪';
+    const rttText = client.lastRTT ? `${client.lastRTT}ms` : 'measuring...';
+    
+    console.log(`   ${index + 1}. ${role} ${networkIndicator} ${client.geo.flag} ${client.geo.city}, ${client.geo.country} (${duration}s, ${rttText})`);
   });
   console.log('');
 }
