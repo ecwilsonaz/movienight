@@ -515,10 +515,10 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                     };
             }
 
-            // iOS Safari adjustments: higher tolerance, longer delays, less frequent sync
+            // iOS Safari adjustments: much higher tolerance for natural timing variations
             if (isIOSSafari) {
                 settings = {
-                    tolerance: Math.max(settings.tolerance * 2.5, 1.0),  // Higher tolerance for iOS timing variations
+                    tolerance: Math.max(settings.tolerance * 4, 3.5),    // Much higher tolerance for iOS natural timing variations
                     maxRetries: Math.max(settings.maxRetries - 1, 1),    // Fewer retries to reduce choppiness
                     heartbeatInterval: settings.heartbeatInterval + 1500, // Less frequent status reports
                     syncDelay: settings.syncDelay + 800                  // Longer delays for iOS video pipeline
@@ -625,7 +625,7 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 settings = {
                     ...settings,
                     maxRetries: 1,  // Only one retry for unpause to prevent stuttering
-                    tolerance: Math.max(settings.tolerance, 1.5)  // Higher tolerance for unpause
+                    tolerance: Math.max(settings.tolerance, 4.0)  // Higher tolerance for unpause timing variations
                 };
                 console.log('iOS Safari unpause: using reduced retry settings');
                 
