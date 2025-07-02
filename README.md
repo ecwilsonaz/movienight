@@ -45,23 +45,53 @@ Ultra-reliable synchronized video viewing for up to 5 people with real-time moni
 - **Buffering detection**: Smart handling of slow connections and loading states
 - **Late joiner sync**: New viewers automatically sync to current playback position
 
-## 🌐 Browser Compatibility
+## 🌐 Universal Browser Compatibility
 
-### **Recommended Setup (Universal Compatibility)**
-- **Video format**: MP4/H.264 for all browsers (Chrome, Safari, Firefox, Edge)
-- **Audio format**: AAC
-- **Encoding**: H.264 High Profile, 2-5 Mbps bitrate
+### **Multi-Format Support (All Browsers)**
+The system now automatically detects browser capabilities and serves the optimal video format:
 
-### **Current Setup (Chrome-Only)**
-- **Video format**: WebM (Chrome/Edge only)
-- **Limitation**: Safari and Firefox not supported
+- **Safari**: HEVC → MP4/H.264 → WebM (with autoplay handling)
+- **Chrome**: WebM → MP4/H.264 → HEVC
+- **Firefox**: MP4/H.264 → WebM
+- **Edge**: WebM → MP4/H.264 → HEVC
 
-### **Browser Support by Format**
-| Format | Chrome | Safari | Firefox | Edge |
-|--------|--------|--------|---------|------|
-| **MP4/H.264** | ✅ | ✅ | ✅ | ✅ |
-| **WebM** | ✅ | ❌ | ✅ | ✅ |
-| **MP4/HEVC** | ⚠️ | ✅ | ❌ | ⚠️ |
+### **Format Setup Options**
+
+#### **Option 1: Multi-Format (Recommended)**
+Configure multiple formats for optimal compatibility:
+```json
+{
+  "videoFormats": {
+    "mp4": "https://yourserver.com/video.mp4",
+    "webm": "https://yourserver.com/video.webm",
+    "hevc": "https://yourserver.com/video-hevc.mp4"
+  },
+  "slug": "your-slug",
+  "startTime": 0
+}
+```
+
+#### **Option 2: Single Format (Universal)**
+Use MP4/H.264 for all browsers:
+```json
+{
+  "videoUrl": "https://yourserver.com/video.mp4",
+  "slug": "your-slug", 
+  "startTime": 0
+}
+```
+
+### **Browser Support Matrix**
+| Format | Chrome | Safari | Firefox | Edge | Notes |
+|--------|--------|--------|---------|------|-------|
+| **MP4/H.264** | ✅ | ✅ | ✅ | ✅ | Universal support |
+| **WebM** | ✅ | ❌ | ✅ | ✅ | Best compression |
+| **MP4/HEVC** | ⚠️ | ✅ | ❌ | ⚠️ | Safari native, others limited |
+
+### **Safari-Specific Features**
+- **Autoplay handling**: Interactive play button overlay
+- **Mobile optimization**: `playsinline` attribute for iOS
+- **Format preference**: Prioritizes HEVC for best quality
 
 ## 🚀 Production Deployment
 
@@ -139,7 +169,7 @@ server {
     }
 
     # Serve video files directly (for better performance)
-    location ~* \.(webm|mp4|avi|mov)$ {
+    location ~* \.(webm|mp4|avi|mov|mkv)$ {
         root /var/www/html;
         add_header 'Access-Control-Allow-Origin' '*' always;
         add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
@@ -173,6 +203,20 @@ cp session.example.json session.json
 nano session.json
 ```
 
+**Multi-format configuration (recommended):**
+```json
+{
+  "videoFormats": {
+    "mp4": "https://movienight.yourdomain.com/your-video.mp4",
+    "webm": "https://movienight.yourdomain.com/your-video.webm",
+    "hevc": "https://movienight.yourdomain.com/your-video-hevc.mp4"
+  },
+  "slug": "your-custom-slug",
+  "startTime": 0
+}
+```
+
+**Single format configuration:**
 ```json
 {
   "videoUrl": "https://movienight.yourdomain.com/your-video.mp4",
@@ -234,10 +278,11 @@ pm2 save
 ## 🛠️ Troubleshooting
 
 ### **Video Not Loading**
-1. **Check video format**: Use MP4/H.264 for universal compatibility
-2. **Test direct access**: Visit `https://yourserver.com/video.mp4` directly
+1. **Check video format**: Multi-format setup provides best compatibility
+2. **Test direct access**: Visit video URLs directly to verify accessibility
 3. **Verify CORS headers**: Check nginx video serving configuration
-4. **Check file permissions**: Ensure nginx can read the video file
+4. **Check file permissions**: Ensure nginx can read all video files
+5. **Browser compatibility**: Check browser console for format support errors
 
 ### **Sync Issues**
 1. **Check admin dashboard**: Press 'V' to see viewer sync status
@@ -259,9 +304,9 @@ pm2 save
 ## 📋 Requirements
 
 - **Server**: Node.js 18+, nginx (for production)
-- **Video**: MP4/H.264 recommended for universal browser support
+- **Video**: Multi-format support (MP4/H.264, WebM, HEVC) or single MP4/H.264
 - **Network**: HTTPS recommended, WebSocket support required
-- **Browsers**: Chrome, Safari, Firefox, Edge (with MP4)
+- **Browsers**: Universal support - Chrome, Safari, Firefox, Edge
 
 ## 🔧 Development
 
@@ -282,8 +327,16 @@ export PORT=3000  # Server port (default: 3000)
 # Convert to MP4/H.264 for universal compatibility
 ffmpeg -i input.mkv -c:v libx264 -c:a aac -movflags +faststart output.mp4
 
-# Optimize for streaming
-ffmpeg -i input.mkv -c:v libx264 -preset medium -crf 23 -c:a aac -b:a 128k -movflags +faststart output.mp4
+# Create WebM for Chrome optimization
+ffmpeg -i input.mkv -c:v libvpx-vp9 -c:a libopus -b:v 2M -b:a 128k output.webm
+
+# Create HEVC for Safari (macOS/iOS)
+ffmpeg -i input.mkv -c:v libx265 -c:a aac -preset medium -crf 28 -movflags +faststart output-hevc.mp4
+
+# Batch convert all formats
+ffmpeg -i input.mkv -c:v libx264 -c:a aac -movflags +faststart video.mp4 \
+       -c:v libvpx-vp9 -c:a libopus -b:v 2M -b:a 128k video.webm \
+       -c:v libx265 -c:a aac -preset medium -crf 28 -movflags +faststart video-hevc.mp4
 ```
 
 ---
