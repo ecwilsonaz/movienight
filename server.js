@@ -392,7 +392,14 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             trySync();
         }
 
+        console.log('Client sending join request with isAdmin:', isAdmin);
         socket.emit('join', { isAdmin, startTime: ${sessionConfig.startTime} });
+        
+        // Debug: Check if we get any admin-related response within 2 seconds
+        setTimeout(() => {
+            console.log('Current admin status after 2s:', isAdmin);
+            console.log('Status element text:', status.textContent);
+        }, 2000);
 
         // Prevent viewer interactions while preserving volume controls
         if (!isAdmin) {
@@ -576,7 +583,7 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         });
 
         socket.on('adminDenied', (data) => {
-            console.log('Admin access denied:', data.reason);
+            console.log('❌ Admin access denied:', data.reason);
             status.textContent = 'VIEWER - Admin Active';
             
             // Show notification to user
@@ -591,7 +598,7 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         });
 
         socket.on('adminGranted', (data) => {
-            console.log('Admin access granted:', data.message);
+            console.log('✅ Admin access granted:', data.message);
             isAdmin = true;
             status.textContent = 'ADMIN';
             
@@ -623,7 +630,7 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         });
 
         socket.on('connect', () => {
-            console.log('Connected to server');
+            console.log('✅ Connected to server');
             
             // Start network quality measurement
             measureNetworkQuality(); // Initial measurement
