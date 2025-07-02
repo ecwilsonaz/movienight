@@ -495,7 +495,7 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                     heartbeatInterval: settings.heartbeatInterval + 1500, // Less frequent status reports
                     syncDelay: settings.syncDelay + 800                  // Longer delays for iOS video pipeline
                 };
-                console.log(\`iOS Safari: Using relaxed sync settings (tolerance: \${settings.tolerance}s)\`);
+                console.log(\`iOS Safari: Using relaxed sync settings (tolerance: \${settings.tolerance}s, maxRetries: \${settings.maxRetries})\`);
             }
 
             return settings;
@@ -557,8 +557,19 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 return;
             }
 
-            const settings = customSettings || getAdaptiveSettings();
+            let settings = customSettings || getAdaptiveSettings();
             let attempts = 0;
+            
+            // Special handling for iOS Safari unpause: reduce retries to minimize choppiness
+            const isUnpauseTransition = video.paused && (data.type === 'play' || data.isPlaying);
+            if (isIOSSafari && isUnpauseTransition) {
+                settings = {
+                    ...settings,
+                    maxRetries: 1,  // Only one retry for unpause to prevent stuttering
+                    tolerance: Math.max(settings.tolerance, 1.5)  // Higher tolerance for unpause
+                };
+                console.log('iOS Safari unpause: using reduced retry settings');
+            }
             
             const trySync = () => {
                 attempts++;
@@ -568,37 +579,72 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 
                 // Apply the sync with iOS Safari-specific handling
                 const applyVideoChanges = () => {
-                    video.currentTime = data.currentTime;
+                    // Detect if this is an unpause transition (was paused, now playing)
+                    const isUnpauseTransition = video.paused && (data.type === 'play' || data.isPlaying);
                     
-                    if (data.type === 'play' || data.isPlaying) {
-                        // Safari may need user interaction for first play
-                        const playPromise = video.play();
-                        if (playPromise !== undefined) {
-                            playPromise.catch(e => {
-                                if (isSafari && e.name === 'NotAllowedError') {
-                                    console.log('Safari requires user interaction for autoplay');
-                                    // Show a play button overlay for Safari users
-                                    showSafariPlayButton();
-                                } else {
-                                    console.log('Play failed:', e);
-                                }
-                            });
+                    if (isIOSSafari && isUnpauseTransition) {
+                        // iOS Safari: separate seek and play for smooth unpause
+                        console.log('iOS Safari unpause: separating seek and play operations');
+                        
+                        // Step 1: Pre-position slightly behind target to allow smooth transition
+                        const targetTime = data.currentTime;
+                        const prepTime = Math.max(targetTime - 0.1, 0); // 100ms earlier, but not negative
+                        video.currentTime = prepTime;
+                        
+                        // Step 2: Wait for seek to settle, then fine-tune position and play
+                        setTimeout(() => {
+                            // Fine-tune to exact position after pre-positioning
+                            video.currentTime = targetTime;
+                            
+                            // Step 3: Start playback
+                            const playPromise = video.play();
+                            if (playPromise !== undefined) {
+                                playPromise.catch(e => {
+                                    if (e.name === 'NotAllowedError') {
+                                        console.log('iOS Safari unpause requires user interaction for autoplay');
+                                        showSafariPlayButton();
+                                        // Mark as successful to prevent retries during user interaction
+                                        syncInProgress = false;
+                                    } else {
+                                        console.log('iOS Safari unpause play failed:', e);
+                                    }
+                                });
+                            }
+                        }, 120); // Allow seek to settle before playing
+                    } else {
+                        // Standard sync logic for other browsers or non-unpause operations
+                        video.currentTime = data.currentTime;
+                        
+                        if (data.type === 'play' || data.isPlaying) {
+                            // Safari may need user interaction for first play
+                            const playPromise = video.play();
+                            if (playPromise !== undefined) {
+                                playPromise.catch(e => {
+                                    if (isSafari && e.name === 'NotAllowedError') {
+                                        console.log('Safari requires user interaction for autoplay');
+                                        // Show a play button overlay for Safari users
+                                        showSafariPlayButton();
+                                    } else {
+                                        console.log('Play failed:', e);
+                                    }
+                                });
+                            }
+                        } else if (data.type === 'pause' || data.isPlaying === false) {
+                            video.pause();
                         }
-                    } else if (data.type === 'pause' || data.isPlaying === false) {
-                        video.pause();
                     }
                 };
 
                 // iOS Safari needs longer delays for video pipeline processing
                 if (isIOSSafari) {
-                    // Add delay before applying changes to let iOS video pipeline settle
-                    setTimeout(applyVideoChanges, 150);
+                    // Reduced delay - modern iOS handles video operations faster
+                    setTimeout(applyVideoChanges, 75);
                 } else {
                     applyVideoChanges();
                 }
                 
-                // Check if sync was successful after a brief delay (longer for iOS)
-                const checkDelay = isIOSSafari ? 400 : 250;
+                // Check if sync was successful after a brief delay (optimized for iOS)
+                const checkDelay = isIOSSafari ? 250 : 200;
                 setTimeout(() => {
                     const timeDiff = Math.abs(video.currentTime - data.currentTime);
                     
