@@ -430,6 +430,15 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                     socket.emit('heartbeat', { currentTime: video.currentTime });
                 }
             }, 3000);
+
+            // Enhanced admin broadcasts - send full state every 10 seconds
+            setInterval(() => {
+                socket.emit('fullStateSync', { 
+                    currentTime: video.currentTime,
+                    isPlaying: !video.paused,
+                    timestamp: Date.now()
+                });
+            }, 10000);
         }
 
         socket.on('control', (data) => {
@@ -455,6 +464,24 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             if (!isAdmin && !syncInProgress) {
                 console.log('Late joiner sync received:', data.type, 'at', data.currentTime);
                 applySync(data);
+            }
+        });
+
+        socket.on('fullStateSync', (data) => {
+            if (!isAdmin && !syncInProgress) {
+                const settings = getAdaptiveSettings();
+                const timeDiff = Math.abs(video.currentTime - data.currentTime);
+                const playStateMismatch = video.paused !== !data.isPlaying;
+                
+                // Force resync if significantly out of sync or play state mismatch
+                if (timeDiff > (settings.tolerance * 2) || playStateMismatch) {
+                    console.log(\`Full state resync needed: time diff \${timeDiff.toFixed(1)}s, play mismatch: \${playStateMismatch}\`);
+                    applySync({
+                        type: data.isPlaying ? 'play' : 'pause',
+                        currentTime: data.currentTime,
+                        isPlaying: data.isPlaying
+                    });
+                }
             }
         });
 
@@ -673,6 +700,19 @@ io.on('connection', async (socket) => {
       } else {
         clientInfo.networkQuality = 'poor';
       }
+    }
+  });
+
+  socket.on('fullStateSync', (data) => {
+    if (socket.isAdmin) {
+      // Update server state from admin's full state
+      currentState.currentTime = data.currentTime;
+      currentState.isPlaying = data.isPlaying;
+      currentState.lastUpdate = Date.now();
+      
+      // Broadcast to all other clients
+      socket.broadcast.emit('fullStateSync', data);
+      console.log(\`📡 Admin full state broadcast: \${data.isPlaying ? 'playing' : 'paused'} at \${data.currentTime.toFixed(1)}s\`);
     }
   });
 
