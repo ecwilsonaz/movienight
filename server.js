@@ -145,7 +145,7 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
     </style>
 </head>
 <body>
-    <video id="video" controls autoplay muted crossorigin="anonymous">
+    <video id="video" controls autoplay crossorigin="anonymous">
         <source src="${sessionConfig.videoUrl}" type="video/webm">
     </video>
     <div id="status" class="status">${isAdmin ? 'ADMIN' : 'VIEWER'}</div>
