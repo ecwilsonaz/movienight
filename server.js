@@ -251,6 +251,10 @@ function detectBrowser(userAgent) {
   const ua = userAgent.toLowerCase();
   
   if (ua.includes('safari') && !ua.includes('chrome')) {
+    // Detect iOS Safari vs desktop Safari
+    if (ua.includes('mobile') || ua.includes('iphone') || ua.includes('ipad')) {
+      return 'ios-safari';
+    }
     return 'safari';
   } else if (ua.includes('firefox')) {
     return 'firefox';
@@ -266,11 +270,12 @@ function detectBrowser(userAgent) {
 function getOptimalVideoFormat(browser, videoFormats) {
   // Format priority by browser
   const formatPriority = {
-    safari: ['hevc', 'mp4', 'webm'],     // Safari prefers HEVC, falls back to H.264
-    chrome: ['webm', 'mp4', 'hevc'],     // Chrome prefers WebM
-    firefox: ['webm', 'mp4'],            // Firefox doesn't support HEVC
-    edge: ['mp4', 'webm', 'hevc'],       // Edge prefers H.264
-    unknown: ['mp4', 'webm']             // Default to universal H.264
+    'ios-safari': ['hevc', 'mp4', 'webm'], // iOS Safari: HEVC excellent on modern iOS
+    safari: ['hevc', 'mp4', 'webm'],       // Desktop Safari: HEVC preferred
+    chrome: ['webm', 'mp4', 'hevc'],       // Chrome prefers WebM
+    firefox: ['webm', 'mp4'],              // Firefox doesn't support HEVC
+    edge: ['mp4', 'webm', 'hevc'],         // Edge prefers H.264
+    unknown: ['mp4', 'webm']               // Default to universal H.264
   };
   
   const priorities = formatPriority[browser] || formatPriority.unknown;
@@ -329,10 +334,11 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
     </style>
 </head>
 <body>
-    <video id="video" controls ${browser === 'safari' ? 'playsinline' : ''} muted crossorigin="anonymous" preload="metadata">
+    <video id="video" controls ${browser === 'safari' || browser === 'ios-safari' ? 'playsinline' : ''} muted crossorigin="anonymous" preload="metadata">
         ${(() => {
           // Generate sources in browser priority order
           const formatPriority = {
+            'ios-safari': ['hevc', 'mp4', 'webm'],
             safari: ['hevc', 'mp4', 'webm'],
             chrome: ['webm', 'mp4', 'hevc'],
             firefox: ['mp4', 'webm'],
@@ -372,7 +378,8 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         
         // Browser detection
         const browser = '${browser}';
-        const isSafari = browser === 'safari';
+        const isSafari = browser === 'safari' || browser === 'ios-safari';
+        const isIOSSafari = browser === 'ios-safari';
         const optimalFormat = '${optimalVideo.format}';
         
         console.log(\`Browser: \${browser}, optimal format: \${optimalFormat}\`);
@@ -401,16 +408,31 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             // Calculate average RTT
             const avgRTT = rttHistory.reduce((a, b) => a + b, 0) / rttHistory.length;
             
-            // Classify connection quality
+            // Classify connection quality (adjusted thresholds for mobile)
             const oldQuality = networkQuality;
-            if (avgRTT < 50) {
-                networkQuality = 'excellent';
-            } else if (avgRTT < 150) {
-                networkQuality = 'good';
-            } else if (avgRTT < 300) {
-                networkQuality = 'fair';
+            
+            // iOS Safari gets more generous thresholds due to mobile network characteristics
+            if (isIOSSafari) {
+                if (avgRTT < 80) {
+                    networkQuality = 'excellent';
+                } else if (avgRTT < 200) {
+                    networkQuality = 'good';
+                } else if (avgRTT < 400) {
+                    networkQuality = 'fair';
+                } else {
+                    networkQuality = 'poor';
+                }
             } else {
-                networkQuality = 'poor';
+                // Desktop thresholds
+                if (avgRTT < 50) {
+                    networkQuality = 'excellent';
+                } else if (avgRTT < 150) {
+                    networkQuality = 'good';
+                } else if (avgRTT < 300) {
+                    networkQuality = 'fair';
+                } else {
+                    networkQuality = 'poor';
+                }
             }
             
             // Update UI if quality changed
@@ -421,43 +443,62 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         }
 
         function getAdaptiveSettings() {
+            // Base settings for desktop browsers
+            let settings;
             switch (networkQuality) {
                 case 'excellent':
-                    return { 
+                    settings = { 
                         tolerance: 0.3, 
                         maxRetries: 1, 
                         heartbeatInterval: 3000,
                         syncDelay: 800 
                     };
+                    break;
                 case 'good':
-                    return { 
+                    settings = { 
                         tolerance: 0.5, 
                         maxRetries: 2, 
                         heartbeatInterval: 3000,
                         syncDelay: 1000 
                     };
+                    break;
                 case 'fair':
-                    return { 
+                    settings = { 
                         tolerance: 1.0, 
                         maxRetries: 3, 
                         heartbeatInterval: 2000,
                         syncDelay: 1500 
                     };
+                    break;
                 case 'poor':
-                    return { 
+                    settings = { 
                         tolerance: 2.0, 
                         maxRetries: 5, 
                         heartbeatInterval: 1000,
                         syncDelay: 2000 
                     };
+                    break;
                 default:
-                    return { 
+                    settings = { 
                         tolerance: 0.5, 
                         maxRetries: 3, 
                         heartbeatInterval: 3000,
                         syncDelay: 1000 
                     };
             }
+
+            // iOS Safari adjustments: higher tolerance, longer delays, less frequent sync
+            if (isIOSSafari) {
+                settings = {
+                    tolerance: Math.max(settings.tolerance * 2.5, 1.0),  // Higher tolerance for iOS timing variations
+                    maxRetries: Math.max(settings.maxRetries - 1, 1),    // Fewer retries to reduce choppiness
+                    heartbeatInterval: settings.heartbeatInterval + 1500, // Less frequent status reports
+                    syncDelay: settings.syncDelay + 800                  // Longer delays for iOS video pipeline
+                };
+                console.log(\`iOS Safari: Using relaxed sync settings (tolerance: \${settings.tolerance}s)\`);
+            }
+
+            return settings;
         }
 
         function updateConnectionIndicator() {
@@ -525,27 +566,39 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 
                 console.log(\`Sync attempt \${attempts}/\${settings.maxRetries}: \${data.type} at \${data.currentTime}s (\${networkQuality})\`);
                 
-                // Apply the sync with Safari-specific handling
-                video.currentTime = data.currentTime;
-                if (data.type === 'play' || data.isPlaying) {
-                    // Safari may need user interaction for first play
-                    const playPromise = video.play();
-                    if (playPromise !== undefined) {
-                        playPromise.catch(e => {
-                            if (isSafari && e.name === 'NotAllowedError') {
-                                console.log('Safari requires user interaction for autoplay');
-                                // Show a play button overlay for Safari users
-                                showSafariPlayButton();
-                            } else {
-                                console.log('Play failed:', e);
-                            }
-                        });
+                // Apply the sync with iOS Safari-specific handling
+                const applyVideoChanges = () => {
+                    video.currentTime = data.currentTime;
+                    
+                    if (data.type === 'play' || data.isPlaying) {
+                        // Safari may need user interaction for first play
+                        const playPromise = video.play();
+                        if (playPromise !== undefined) {
+                            playPromise.catch(e => {
+                                if (isSafari && e.name === 'NotAllowedError') {
+                                    console.log('Safari requires user interaction for autoplay');
+                                    // Show a play button overlay for Safari users
+                                    showSafariPlayButton();
+                                } else {
+                                    console.log('Play failed:', e);
+                                }
+                            });
+                        }
+                    } else if (data.type === 'pause' || data.isPlaying === false) {
+                        video.pause();
                     }
-                } else if (data.type === 'pause' || data.isPlaying === false) {
-                    video.pause();
+                };
+
+                // iOS Safari needs longer delays for video pipeline processing
+                if (isIOSSafari) {
+                    // Add delay before applying changes to let iOS video pipeline settle
+                    setTimeout(applyVideoChanges, 150);
+                } else {
+                    applyVideoChanges();
                 }
                 
-                // Check if sync was successful after a brief delay
+                // Check if sync was successful after a brief delay (longer for iOS)
+                const checkDelay = isIOSSafari ? 400 : 250;
                 setTimeout(() => {
                     const timeDiff = Math.abs(video.currentTime - data.currentTime);
                     
@@ -566,7 +619,7 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                             wasPlaying = !video.paused;
                         }
                     }
-                }, 200);
+                }, checkDelay);
             };
             
             trySync();
