@@ -143,8 +143,8 @@ function showCurrentViewers() {
         if (reportAge > 6) {
           // Very stale data
           syncStatus = ` ❓ No data (${Math.floor(reportAge)}s ago)`;
-        } else if (reportAge > 3) {
-          // Stale data
+        } else if (reportAge > 2.5) {
+          // Stale data (don't show sync status for old reports)
           syncStatus = ` ⏰ Stale (${Math.floor(reportAge)}s ago)`;
         } else {
           // Fresh data - show actual sync status
@@ -201,7 +201,7 @@ function showCurrentViewers() {
     
     if (reportAge > 6) {
       veryStale++;
-    } else if (reportAge > 3) {
+    } else if (reportAge > 2.5) {
       staleReports++;
     } else {
       // Fresh data - check sync status
