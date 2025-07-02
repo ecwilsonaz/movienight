@@ -310,6 +310,8 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
   const optimalVideo = getOptimalVideoFormat(browser, videoFormats);
   
   console.log(`🎥 ${browser} client requested ${sessionConfig.slug}, serving ${optimalVideo.format} format`);
+  console.log(`📱 User-Agent: ${userAgent}`);
+  console.log(`🎬 Available formats: ${Object.keys(videoFormats).join(', ')}`);
   
   const html = `<!DOCTYPE html>
 <html>
@@ -327,11 +329,30 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
 </head>
 <body>
     <video id="video" controls ${browser === 'safari' ? 'playsinline' : ''} muted crossorigin="anonymous" preload="metadata">
-        ${Object.entries(videoFormats).map(([format, url]) => {
-          const mimeType = format === 'hevc' ? 'video/mp4; codecs="hvc1"' :
-                          format === 'mp4' ? 'video/mp4' : 'video/webm';
-          return `<source src="${url}" type="${mimeType}">`;
-        }).join('\n        ')}
+        ${(() => {
+          // Generate sources in browser priority order
+          const formatPriority = {
+            safari: ['hevc', 'mp4', 'webm'],
+            chrome: ['webm', 'mp4', 'hevc'],
+            firefox: ['mp4', 'webm'],
+            edge: ['webm', 'mp4', 'hevc'],
+            unknown: ['mp4', 'webm']
+          };
+          
+          const priorities = formatPriority[browser] || formatPriority.unknown;
+          const sources = [];
+          
+          // Add sources in priority order
+          for (const format of priorities) {
+            if (videoFormats[format]) {
+              const mimeType = format === 'hevc' ? 'video/mp4; codecs="hvc1"' :
+                              format === 'mp4' ? 'video/mp4' : 'video/webm';
+              sources.push(`<source src="${videoFormats[format]}" type="${mimeType}">`);
+            }
+          }
+          
+          return sources.join('\n        ');
+        })()}
         <p>Your browser doesn't support any of the available video formats.</p>
     </video>
     <div id="status" class="status">${isAdmin ? 'ADMIN' : 'VIEWER'}</div>
