@@ -620,6 +620,10 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             updateNetworkQuality(rtt);
         });
 
+        socket.on('testResponse', (data) => {
+            console.log('🧪 Test response received:', data.message);
+        });
+
         socket.on('connect', () => {
             console.log('✅ Connected to server');
             
@@ -629,6 +633,10 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             
             // Update connection indicator
             updateConnectionIndicator();
+            
+            // Test socket communication first
+            console.log('🧪 Testing socket communication...');
+            socket.emit('test', { message: 'Hello from client' });
             
             // Send join request after a brief delay to ensure server handlers are ready
             setTimeout(() => {
@@ -686,6 +694,12 @@ io.on('connection', async (socket) => {
   connectedClients.set(socket.id, clientInfo);
   
   console.log(`🟢 Client connected: ${socket.id.substring(0, 8)}... from ${geo.flag} ${geo.city}, ${geo.country}`);
+
+  // Test: Register a simple event handler to verify events are working
+  socket.on('test', (data) => {
+    console.log(`🧪 Test event received from ${socket.id.substring(0, 8)}: ${data.message}`);
+    socket.emit('testResponse', { message: 'Server received test event' });
+  });
 
   socket.on('join', (data) => {
     try {
