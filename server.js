@@ -392,15 +392,6 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             trySync();
         }
 
-        console.log('Client sending join request with isAdmin:', isAdmin);
-        socket.emit('join', { isAdmin, startTime: ${sessionConfig.startTime} });
-        
-        // Debug: Check if we get any admin-related response within 2 seconds
-        setTimeout(() => {
-            console.log('Current admin status after 2s:', isAdmin);
-            console.log('Status element text:', status.textContent);
-        }, 2000);
-
         // Prevent viewer interactions while preserving volume controls
         if (!isAdmin) {
             let lastValidTime = 0;
@@ -638,6 +629,18 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             
             // Update connection indicator
             updateConnectionIndicator();
+            
+            // Send join request after a brief delay to ensure server handlers are ready
+            setTimeout(() => {
+                console.log('Client sending join request with isAdmin:', isAdmin);
+                socket.emit('join', { isAdmin, startTime: ${sessionConfig.startTime} });
+                
+                // Debug: Check if we get any admin-related response within 2 seconds
+                setTimeout(() => {
+                    console.log('Current admin status after 2s:', isAdmin);
+                    console.log('Status element text:', status.textContent);
+                }, 2000);
+            }, 100);
         });
 
         socket.on('disconnect', () => {
@@ -685,9 +688,10 @@ io.on('connection', async (socket) => {
   console.log(`🟢 Client connected: ${socket.id.substring(0, 8)}... from ${geo.flag} ${geo.city}, ${geo.country}`);
 
   socket.on('join', (data) => {
-    console.log(`🔗 Join request: ${socket.id.substring(0, 8)}... requesting admin=${data.isAdmin}`);
-    
-    if (data.isAdmin) {
+    try {
+      console.log(`🔗 Join request: ${socket.id.substring(0, 8)}... requesting admin=${data?.isAdmin}`);
+      
+      if (data?.isAdmin) {
       // Check if admin slot is already taken by an active connection
       if (adminSocket && adminSocket.connected) {
         // Admin slot is taken - deny admin privileges
@@ -754,6 +758,9 @@ io.on('connection', async (socket) => {
     
     socket.emit('adminStatus', { hasAdmin: !!adminSocket });
     socket.broadcast.emit('adminStatus', { hasAdmin: !!adminSocket });
+    } catch (error) {
+      console.error(`❌ Error in join handler for ${socket.id.substring(0, 8)}:`, error);
+    }
   });
 
   socket.on('control', (data) => {
