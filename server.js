@@ -22,6 +22,8 @@ let currentState = {
   currentTime: 0,
   lastUpdate: Date.now()
 };
+let syncCommands = new Map(); // Track pending sync commands
+let viewerStates = new Map(); // Track viewer playback states
 
 // Country code to flag emoji mapping
 const flagEmojis = {
@@ -129,8 +131,45 @@ function showCurrentViewers() {
     const networkIndicator = networkEmojis[client.networkQuality] || '⚪';
     const rttText = client.lastRTT ? `${client.lastRTT}ms` : 'measuring...';
     
-    console.log(`   ${index + 1}. ${role} ${networkIndicator} ${client.geo.flag} ${client.geo.city}, ${client.geo.country} (${duration}s, ${rttText})`);
+    // Sync status for viewers
+    let syncStatus = '';
+    if (!client.isAdmin) {
+      const viewerState = viewerStates.get(client.id);
+      if (viewerState) {
+        const timeDiff = Math.abs(viewerState.currentTime - currentState.currentTime);
+        const playSync = viewerState.isPlaying === currentState.isPlaying;
+        const tolerance = viewerState.networkQuality === 'poor' ? 2.0 : 
+                         viewerState.networkQuality === 'fair' ? 1.0 : 0.5;
+        
+        if (timeDiff <= tolerance && playSync) {
+          syncStatus = ' ✅';
+        } else if (viewerState.buffering) {
+          syncStatus = ' 🔄';
+        } else {
+          syncStatus = ` ❌(${timeDiff.toFixed(1)}s)`;
+        }
+      } else {
+        syncStatus = ' ❓';
+      }
+    }
+    
+    console.log(`   ${index + 1}. ${role} ${networkIndicator} ${client.geo.flag} ${client.geo.city}, ${client.geo.country} (${duration}s, ${rttText})${syncStatus}`);
   });
+  
+  // Summary
+  const viewers = clients.filter(c => !c.isAdmin);
+  const inSync = viewers.filter(c => {
+    const state = viewerStates.get(c.id);
+    if (!state) return false;
+    const timeDiff = Math.abs(state.currentTime - currentState.currentTime);
+    const tolerance = state.networkQuality === 'poor' ? 2.0 : 
+                     state.networkQuality === 'fair' ? 1.0 : 0.5;
+    return timeDiff <= tolerance && state.isPlaying === currentState.isPlaying;
+  });
+  
+  if (viewers.length > 0) {
+    console.log(`\n   Sync Status: ${inSync.length}/${viewers.length} viewers in sync`);
+  }
   console.log('');
 }
 
@@ -441,10 +480,46 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             }, 10000);
         }
 
+        // Viewer status reporting
+        if (!isAdmin) {
+            // Send status updates every 2 seconds
+            setInterval(() => {
+                if (videoReady) {
+                    socket.emit('viewerStatus', {
+                        currentTime: video.currentTime,
+                        isPlaying: !video.paused,
+                        buffering: video.readyState < 3,
+                        networkQuality: networkQuality,
+                        timestamp: Date.now()
+                    });
+                }
+            }, 2000);
+            
+            // Send sync acknowledgments
+            function sendSyncAck(commandId, success, actualTime) {
+                socket.emit('syncAck', {
+                    commandId: commandId,
+                    success: success,
+                    currentTime: actualTime || video.currentTime,
+                    timestamp: Date.now()
+                });
+            }
+        }
+
         socket.on('control', (data) => {
             if (!isAdmin && !syncInProgress) {
                 console.log('Received admin control:', data.type);
                 applySync(data);
+                
+                // Send acknowledgment after sync attempt
+                if (!isAdmin) {
+                    setTimeout(() => {
+                        const timeDiff = Math.abs(video.currentTime - data.currentTime);
+                        const settings = getAdaptiveSettings();
+                        const success = timeDiff <= settings.tolerance;
+                        sendSyncAck(data.commandId, success, video.currentTime);
+                    }, 500);
+                }
             }
         });
 
@@ -658,16 +733,29 @@ io.on('connection', async (socket) => {
 
   socket.on('control', (data) => {
     if (socket.isAdmin) {
+      // Add command ID for tracking
+      const commandId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+      data.commandId = commandId;
+      
       // Update server state tracking
       currentState.currentTime = data.currentTime;
       currentState.isPlaying = (data.type === 'play');
       currentState.lastUpdate = Date.now();
       
+      // Store command for tracking acknowledgments
+      syncCommands.set(commandId, {
+        type: data.type,
+        currentTime: data.currentTime,
+        isPlaying: data.isPlaying,
+        timestamp: Date.now(),
+        acks: new Set()
+      });
+      
       socket.broadcast.emit('control', data);
       
       const clientInfo = connectedClients.get(socket.id);
       const flag = clientInfo ? clientInfo.geo.flag : '👑';
-      console.log(`🎬 Admin control: ${data.type} at ${data.currentTime.toFixed(1)}s ${flag}`);
+      console.log(`🎬 Admin control: ${data.type} at ${data.currentTime.toFixed(1)}s ${flag} [${commandId}]`);
     }
   });
 
@@ -716,6 +804,68 @@ io.on('connection', async (socket) => {
     }
   });
 
+  // Handle viewer status updates
+  socket.on('viewerStatus', (data) => {
+    if (!socket.isAdmin) {
+      // Store viewer state
+      viewerStates.set(socket.id, {
+        currentTime: data.currentTime,
+        isPlaying: data.isPlaying,
+        buffering: data.buffering,
+        networkQuality: data.networkQuality,
+        timestamp: data.timestamp,
+        lastUpdate: Date.now()
+      });
+      
+      // Check if viewer is out of sync
+      const timeDiff = Math.abs(data.currentTime - currentState.currentTime);
+      const playStateMismatch = data.isPlaying !== currentState.isPlaying;
+      const tolerance = data.networkQuality === 'poor' ? 2.0 : 
+                       data.networkQuality === 'fair' ? 1.0 : 0.5;
+      
+      if (timeDiff > tolerance || playStateMismatch) {
+        const clientInfo = connectedClients.get(socket.id);
+        const flag = clientInfo ? clientInfo.geo.flag : '👥';
+        console.log(`⚠️  Viewer out of sync: ${flag} diff=${timeDiff.toFixed(1)}s, play=${data.isPlaying}/${currentState.isPlaying}`);
+        
+        // Send targeted resync
+        socket.emit('control', {
+          type: currentState.isPlaying ? 'play' : 'pause',
+          currentTime: currentState.currentTime,
+          isPlaying: currentState.isPlaying,
+          commandId: Date.now() + '-resync-' + socket.id.substr(-4)
+        });
+      }
+    }
+  });
+
+  // Handle sync acknowledgments
+  socket.on('syncAck', (data) => {
+    if (!socket.isAdmin && data.commandId) {
+      const command = syncCommands.get(data.commandId);
+      if (command) {
+        command.acks.add(socket.id);
+        
+        const clientInfo = connectedClients.get(socket.id);
+        const flag = clientInfo ? clientInfo.geo.flag : '👥';
+        const status = data.success ? '✅' : '❌';
+        console.log(`${status} Sync ack: ${flag} ${data.commandId.substr(-8)} success=${data.success} time=${data.currentTime.toFixed(1)}s`);
+        
+        if (!data.success) {
+          // Retry failed sync
+          setTimeout(() => {
+            socket.emit('control', {
+              type: command.type,
+              currentTime: command.currentTime,
+              isPlaying: command.isPlaying,
+              commandId: data.commandId + '-retry'
+            });
+          }, 1000);
+        }
+      }
+    }
+  });
+
   socket.on('disconnect', () => {
     const clientInfo = connectedClients.get(socket.id);
     const wasAdmin = socket === adminSocket;
@@ -726,6 +876,9 @@ io.on('connection', async (socket) => {
     } else {
       console.log(`🔴 Client disconnected: ${socket.id.substring(0, 8)}...`);
     }
+    
+    // Clean up viewer state
+    viewerStates.delete(socket.id);
     
     if (wasAdmin) {
       adminSocket = null;
