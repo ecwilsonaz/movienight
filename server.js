@@ -161,6 +161,101 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         let syncInProgress = false;
         let pendingSync = null;
         let videoReady = false;
+        
+        // Network quality adaptation
+        let networkQuality = 'good'; // excellent, good, fair, poor
+        let currentRTT = 100; // milliseconds
+        let rttHistory = [];
+        let pingInterval = null;
+
+        // Network quality measurement and adaptation
+        function measureNetworkQuality() {
+            const pingStart = Date.now();
+            socket.emit('ping', { timestamp: pingStart });
+        }
+
+        function updateNetworkQuality(rtt) {
+            currentRTT = rtt;
+            rttHistory.push(rtt);
+            
+            // Keep only last 10 measurements
+            if (rttHistory.length > 10) {
+                rttHistory.shift();
+            }
+            
+            // Calculate average RTT
+            const avgRTT = rttHistory.reduce((a, b) => a + b, 0) / rttHistory.length;
+            
+            // Classify connection quality
+            const oldQuality = networkQuality;
+            if (avgRTT < 50) {
+                networkQuality = 'excellent';
+            } else if (avgRTT < 150) {
+                networkQuality = 'good';
+            } else if (avgRTT < 300) {
+                networkQuality = 'fair';
+            } else {
+                networkQuality = 'poor';
+            }
+            
+            // Update UI if quality changed
+            if (oldQuality !== networkQuality) {
+                updateConnectionIndicator();
+                console.log(\`Network quality: \${networkQuality} (RTT: \${avgRTT.toFixed(0)}ms)\`);
+            }
+        }
+
+        function getAdaptiveSettings() {
+            switch (networkQuality) {
+                case 'excellent':
+                    return { 
+                        tolerance: 0.3, 
+                        maxRetries: 1, 
+                        heartbeatInterval: 3000,
+                        syncDelay: 800 
+                    };
+                case 'good':
+                    return { 
+                        tolerance: 0.5, 
+                        maxRetries: 2, 
+                        heartbeatInterval: 3000,
+                        syncDelay: 1000 
+                    };
+                case 'fair':
+                    return { 
+                        tolerance: 1.0, 
+                        maxRetries: 3, 
+                        heartbeatInterval: 2000,
+                        syncDelay: 1500 
+                    };
+                case 'poor':
+                    return { 
+                        tolerance: 2.0, 
+                        maxRetries: 5, 
+                        heartbeatInterval: 1000,
+                        syncDelay: 2000 
+                    };
+                default:
+                    return { 
+                        tolerance: 0.5, 
+                        maxRetries: 3, 
+                        heartbeatInterval: 3000,
+                        syncDelay: 1000 
+                    };
+            }
+        }
+
+        function updateConnectionIndicator() {
+            const qualityEmojis = {
+                'excellent': '🟢',
+                'good': '🟡', 
+                'fair': '🟠',
+                'poor': '🔴'
+            };
+            
+            const indicator = qualityEmojis[networkQuality] || '⚪';
+            status.textContent = (isAdmin ? 'ADMIN' : 'VIEWER') + ' ' + indicator;
+        }
 
         // Video ready detection
         video.addEventListener('loadeddata', () => {
@@ -180,21 +275,22 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             videoReady = true;
         }
 
-        // Smart sync function with retry mechanism
-        function applySync(data, maxRetries = 3) {
+        // Smart sync function with adaptive retry mechanism
+        function applySync(data, customSettings = null) {
             if (!videoReady) {
                 console.log('Video not ready, storing sync for later');
                 pendingSync = data;
                 return;
             }
 
+            const settings = customSettings || getAdaptiveSettings();
             let attempts = 0;
             
             const trySync = () => {
                 attempts++;
                 syncInProgress = true;
                 
-                console.log(\`Sync attempt \${attempts}: \${data.type} at \${data.currentTime}s\`);
+                console.log(\`Sync attempt \${attempts}/\${settings.maxRetries}: \${data.type} at \${data.currentTime}s (\${networkQuality})\`);
                 
                 // Apply the sync
                 video.currentTime = data.currentTime;
@@ -208,15 +304,15 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 setTimeout(() => {
                     const timeDiff = Math.abs(video.currentTime - data.currentTime);
                     
-                    if (timeDiff > 1.0 && attempts < maxRetries) {
-                        console.log(\`Sync failed (diff: \${timeDiff.toFixed(1)}s), retrying...\`);
+                    if (timeDiff > settings.tolerance && attempts < settings.maxRetries) {
+                        console.log(\`Sync failed (diff: \${timeDiff.toFixed(1)}s > \${settings.tolerance}s), retrying...\`);
                         trySync();
                     } else {
                         syncInProgress = false;
-                        if (timeDiff <= 1.0) {
+                        if (timeDiff <= settings.tolerance) {
                             console.log(\`Sync successful (diff: \${timeDiff.toFixed(1)}s)\`);
                         } else {
-                            console.log(\`Sync gave up after \${attempts} attempts\`);
+                            console.log(\`Sync gave up after \${attempts} attempts (final diff: \${timeDiff.toFixed(1)}s)\`);
                         }
                         
                         // Update tracking variables for viewers
@@ -334,9 +430,10 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
 
         socket.on('heartbeat', (data) => {
             if (!isAdmin && !syncInProgress) {
+                const settings = getAdaptiveSettings();
                 const timeDiff = Math.abs(video.currentTime - data.currentTime);
-                if (timeDiff > 0.5 && !video.paused) {
-                    console.log('Heartbeat sync needed, drift:', timeDiff.toFixed(1) + 's');
+                if (timeDiff > settings.tolerance && !video.paused) {
+                    console.log(\`Heartbeat sync needed, drift: \${timeDiff.toFixed(1)}s (tolerance: \${settings.tolerance}s)\`);
                     applySync({ type: 'seek', currentTime: data.currentTime, isPlaying: true });
                 }
             }
@@ -392,12 +489,30 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             }
         });
 
+        socket.on('pong', (data) => {
+            const rtt = Date.now() - data.timestamp;
+            updateNetworkQuality(rtt);
+        });
+
         socket.on('connect', () => {
             console.log('Connected to server');
+            
+            // Start network quality measurement
+            measureNetworkQuality(); // Initial measurement
+            pingInterval = setInterval(measureNetworkQuality, 5000); // Every 5 seconds
+            
+            // Update connection indicator
+            updateConnectionIndicator();
         });
 
         socket.on('disconnect', () => {
             console.log('Disconnected from server');
+            
+            // Stop network quality measurement
+            if (pingInterval) {
+                clearInterval(pingInterval);
+                pingInterval = null;
+            }
         });
     </script>
 </body>
@@ -425,7 +540,9 @@ io.on('connection', async (socket) => {
     ip: cleanIP,
     isAdmin: false,
     geo: geo,
-    connectedAt: new Date()
+    connectedAt: new Date(),
+    networkQuality: 'good', // Track client network quality
+    lastRTT: 100
   };
   
   connectedClients.set(socket.id, clientInfo);
@@ -524,6 +641,27 @@ io.on('connection', async (socket) => {
       currentState.lastUpdate = Date.now();
       
       socket.broadcast.emit('heartbeat', data);
+    }
+  });
+
+  socket.on('ping', (data) => {
+    // Immediately respond with pong for RTT measurement
+    socket.emit('pong', data);
+    
+    // Update client network quality tracking (for future server-side adaptation)
+    const clientInfo = connectedClients.get(socket.id);
+    if (clientInfo && data.rtt !== undefined) {
+      clientInfo.lastRTT = data.rtt;
+      
+      if (data.rtt < 50) {
+        clientInfo.networkQuality = 'excellent';
+      } else if (data.rtt < 150) {
+        clientInfo.networkQuality = 'good';
+      } else if (data.rtt < 300) {
+        clientInfo.networkQuality = 'fair';
+      } else {
+        clientInfo.networkQuality = 'poor';
+      }
     }
   });
 
