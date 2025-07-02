@@ -389,6 +389,10 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         let currentRTT = 100; // milliseconds
         let rttHistory = [];
         let pingInterval = null;
+        
+        // Network quality hysteresis to prevent rapid changes
+        let networkQualityChangeCount = 0;
+        let networkQualityPending = null;
 
         // Network quality measurement and adaptation
         function measureNetworkQuality() {
@@ -408,31 +412,55 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             // Calculate average RTT
             const avgRTT = rttHistory.reduce((a, b) => a + b, 0) / rttHistory.length;
             
-            // Classify connection quality (adjusted thresholds for mobile)
+            // Classify connection quality with hysteresis to prevent rapid changes
             const oldQuality = networkQuality;
+            let newQuality;
             
             // iOS Safari gets more generous thresholds due to mobile network characteristics
             if (isIOSSafari) {
                 if (avgRTT < 80) {
-                    networkQuality = 'excellent';
+                    newQuality = 'excellent';
                 } else if (avgRTT < 200) {
-                    networkQuality = 'good';
+                    newQuality = 'good';
                 } else if (avgRTT < 400) {
-                    networkQuality = 'fair';
+                    newQuality = 'fair';
                 } else {
-                    networkQuality = 'poor';
+                    newQuality = 'poor';
                 }
             } else {
                 // Desktop thresholds
                 if (avgRTT < 50) {
-                    networkQuality = 'excellent';
+                    newQuality = 'excellent';
                 } else if (avgRTT < 150) {
-                    networkQuality = 'good';
+                    newQuality = 'good';
                 } else if (avgRTT < 300) {
-                    networkQuality = 'fair';
+                    newQuality = 'fair';
                 } else {
-                    networkQuality = 'poor';
+                    newQuality = 'poor';
                 }
+            }
+            
+            // Apply hysteresis: require sustained change for 2 measurements
+            if (newQuality !== networkQuality) {
+                if (!networkQualityChangeCount) {
+                    networkQualityChangeCount = 1;
+                    networkQualityPending = newQuality;
+                } else if (networkQualityPending === newQuality) {
+                    networkQualityChangeCount++;
+                    if (networkQualityChangeCount >= 2) {
+                        networkQuality = newQuality;
+                        networkQualityChangeCount = 0;
+                        networkQualityPending = null;
+                    }
+                } else {
+                    // Different change detected, reset counter
+                    networkQualityChangeCount = 1;
+                    networkQualityPending = newQuality;
+                }
+            } else {
+                // Same quality, reset change tracking
+                networkQualityChangeCount = 0;
+                networkQualityPending = null;
             }
             
             // Update UI if quality changed
@@ -561,6 +589,13 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             if (isIOSSafari && isBuffering) {
                 console.log('iOS Safari: Delaying sync - video is buffering');
                 setTimeout(() => applySync(data, customSettings), 500);
+                return;
+            }
+            
+            // iOS Safari power management - delay sync if suspended
+            if (isIOSSafari && typeof videoSuspended !== 'undefined' && videoSuspended) {
+                console.log('iOS Safari: Delaying sync - video suspended by power management');
+                setTimeout(() => applySync(data, customSettings), 1000);
                 return;
             }
             
@@ -765,18 +800,59 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 }
             });
             
+            // Throttled seek blocking to prevent iOS Safari feedback loop
+            let seekBlockTimer = null;
+            let lastSeekBlock = 0;
+            const SEEK_BLOCK_COOLDOWN = 100; // Max once per 100ms
+            
             video.addEventListener('seeking', (e) => {
                 if (!syncInProgress) {
-                    console.log('Viewer attempted to seek - blocked');
-                    setTimeout(() => {
+                    const now = Date.now();
+                    
+                    // Throttle seek blocking to prevent feedback loop
+                    if (now - lastSeekBlock < SEEK_BLOCK_COOLDOWN) {
+                        return; // Skip this event to break the loop
+                    }
+                    
+                    // Clear any pending seek block
+                    if (seekBlockTimer) {
+                        clearTimeout(seekBlockTimer);
+                    }
+                    
+                    lastSeekBlock = now;
+                    
+                    // iOS Safari-specific handling
+                    if (isIOSSafari) {
+                        // Reduce logging for iOS Safari to improve performance
+                        if (Math.random() < 0.001) { // Log only 0.1% of events
+                            console.log('iOS Safari seek blocked (throttled)');
+                        }
+                    } else {
+                        console.log('Viewer attempted to seek - blocked');
+                    }
+                    
+                    seekBlockTimer = setTimeout(() => {
                         video.currentTime = lastValidTime;
-                    }, 1);
+                        seekBlockTimer = null;
+                    }, 10); // Slightly longer delay to let iOS Safari settle
                 }
             });
             
+            // Seeked event handling (fires once vs seeking's continuous firing)
+            let seekedBlockTimer = null;
+            
             video.addEventListener('seeked', (e) => {
                 if (!syncInProgress) {
-                    video.currentTime = lastValidTime;
+                    // Clear any pending seeked block to prevent accumulation
+                    if (seekedBlockTimer) {
+                        clearTimeout(seekedBlockTimer);
+                    }
+                    
+                    // iOS Safari: Use seeked event as backup to seeking
+                    seekedBlockTimer = setTimeout(() => {
+                        video.currentTime = lastValidTime;
+                        seekedBlockTimer = null;
+                    }, 5); // Short delay for iOS Safari
                 }
             });
             
@@ -832,6 +908,12 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                     updateConnectionIndicator();
                 }
             }
+            
+            // Resume sync operations after suspension (will be defined in power management section)
+            if (isIOSSafari && typeof videoSuspended !== 'undefined' && videoSuspended) {
+                videoSuspended = false;
+                console.log('iOS Safari: Video ready after suspension, resuming sync operations');
+            }
         });
         
         video.addEventListener('stalled', (e) => {
@@ -845,14 +927,17 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         });
         
         // Power management events (iOS Safari background/foreground handling)
+        let videoSuspended = false;
+        
         video.addEventListener('suspend', (e) => {
             console.log(\`🔋 Video suspended - iOS power management (\${browser})\`);
             
             if (isIOSSafari) {
-                // iOS has suspended video loading - sync may be affected
-                console.log('iOS Safari: Video loading suspended, sync delays expected');
+                videoSuspended = true;
+                console.log('iOS Safari: Video loading suspended, pausing sync operations');
             }
         });
+        
         
         video.addEventListener('progress', (e) => {
             // Monitor loading progress - iOS Safari may have different patterns
