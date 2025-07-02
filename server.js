@@ -159,6 +159,77 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         let isAdmin = ${isAdmin};
         let lastHeartbeat = Date.now();
         let syncInProgress = false;
+        let pendingSync = null;
+        let videoReady = false;
+
+        // Video ready detection
+        video.addEventListener('loadeddata', () => {
+            videoReady = true;
+            console.log('Video ready for sync');
+            
+            // Apply pending sync if we have one
+            if (pendingSync) {
+                console.log('Applying pending sync...');
+                applySync(pendingSync);
+                pendingSync = null;
+            }
+        });
+
+        // Check if video is already ready (in case event fired before listener)
+        if (video.readyState >= 2) {
+            videoReady = true;
+        }
+
+        // Smart sync function with retry mechanism
+        function applySync(data, maxRetries = 3) {
+            if (!videoReady) {
+                console.log('Video not ready, storing sync for later');
+                pendingSync = data;
+                return;
+            }
+
+            let attempts = 0;
+            
+            const trySync = () => {
+                attempts++;
+                syncInProgress = true;
+                
+                console.log(\`Sync attempt \${attempts}: \${data.type} at \${data.currentTime}s\`);
+                
+                // Apply the sync
+                video.currentTime = data.currentTime;
+                if (data.type === 'play' || data.isPlaying) {
+                    video.play().catch(e => console.log('Play failed:', e));
+                } else if (data.type === 'pause' || data.isPlaying === false) {
+                    video.pause();
+                }
+                
+                // Check if sync was successful after a brief delay
+                setTimeout(() => {
+                    const timeDiff = Math.abs(video.currentTime - data.currentTime);
+                    
+                    if (timeDiff > 1.0 && attempts < maxRetries) {
+                        console.log(\`Sync failed (diff: \${timeDiff.toFixed(1)}s), retrying...\`);
+                        trySync();
+                    } else {
+                        syncInProgress = false;
+                        if (timeDiff <= 1.0) {
+                            console.log(\`Sync successful (diff: \${timeDiff.toFixed(1)}s)\`);
+                        } else {
+                            console.log(\`Sync gave up after \${attempts} attempts\`);
+                        }
+                        
+                        // Update tracking variables for viewers
+                        if (!isAdmin) {
+                            lastValidTime = video.currentTime;
+                            wasPlaying = !video.paused;
+                        }
+                    }
+                }, 200);
+            };
+            
+            trySync();
+        }
 
         socket.emit('join', { isAdmin, startTime: ${sessionConfig.startTime} });
 
@@ -256,26 +327,8 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
 
         socket.on('control', (data) => {
             if (!isAdmin && !syncInProgress) {
-                syncInProgress = true;
-                
-                if (data.type === 'play') {
-                    video.currentTime = data.currentTime;
-                    video.play();
-                } else if (data.type === 'pause') {
-                    video.currentTime = data.currentTime;
-                    video.pause();
-                } else if (data.type === 'seek') {
-                    video.currentTime = data.currentTime;
-                }
-                
-                setTimeout(() => { 
-                    syncInProgress = false;
-                    // Update tracking variables for viewers
-                    if (!isAdmin) {
-                        lastValidTime = video.currentTime;
-                        wasPlaying = !video.paused;
-                    }
-                }, 100);
+                console.log('Received admin control:', data.type);
+                applySync(data);
             }
         });
 
@@ -283,16 +336,8 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             if (!isAdmin && !syncInProgress) {
                 const timeDiff = Math.abs(video.currentTime - data.currentTime);
                 if (timeDiff > 0.5 && !video.paused) {
-                    syncInProgress = true;
-                    video.currentTime = data.currentTime;
-                    setTimeout(() => { 
-                        syncInProgress = false;
-                        // Update tracking variables for viewers
-                        if (!isAdmin) {
-                            lastValidTime = video.currentTime;
-                            wasPlaying = !video.paused;
-                        }
-                    }, 100);
+                    console.log('Heartbeat sync needed, drift:', timeDiff.toFixed(1) + 's');
+                    applySync({ type: 'seek', currentTime: data.currentTime, isPlaying: true });
                 }
             }
             lastHeartbeat = Date.now();
@@ -300,24 +345,8 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
 
         socket.on('syncState', (data) => {
             if (!isAdmin && !syncInProgress) {
-                syncInProgress = true;
-                console.log('Late joiner sync:', data.type, 'at', data.currentTime);
-                
-                video.currentTime = data.currentTime;
-                if (data.isPlaying) {
-                    video.play();
-                } else {
-                    video.pause();
-                }
-                
-                setTimeout(() => { 
-                    syncInProgress = false;
-                    // Update tracking variables for viewers
-                    if (!isAdmin) {
-                        lastValidTime = video.currentTime;
-                        wasPlaying = !video.paused;
-                    }
-                }, 200);
+                console.log('Late joiner sync received:', data.type, 'at', data.currentTime);
+                applySync(data);
             }
         });
 
@@ -455,7 +484,7 @@ io.on('connection', async (socket) => {
             isPlaying: currentState.isPlaying
           });
           console.log('Late joiner sync:', socket.id, 'to time', syncTime);
-        }, 500); // Small delay to ensure video loads first
+        }, 1000); // Increased delay for video loading
       } else if (adminSocket && !currentState.isPlaying) {
         setTimeout(() => {
           socket.emit('syncState', {
@@ -464,7 +493,7 @@ io.on('connection', async (socket) => {
             isPlaying: currentState.isPlaying
           });
           console.log('Late joiner sync (paused):', socket.id, 'to time', currentState.currentTime);
-        }, 500);
+        }, 1000);
       }
     }
     
