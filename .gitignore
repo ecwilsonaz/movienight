@@ -3,3 +3,7 @@ npm-debug.log*
 session.json
 .env
 .DS_Store
+*.webm
+*.mp4
+*.mkv
+*.avi

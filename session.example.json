@@ -1,5 +1,9 @@
 {
-  "videoUrl": "https://example.com/path/to/video.webm",
+  "videoFormats": {
+    "mp4": "https://example.com/path/to/video.mp4",
+    "webm": "https://example.com/path/to/video.webm",
+    "hevc": "https://example.com/path/to/video-hevc.mp4"
+  },
   "slug": "abcd1234",
   "startTime": 0
 }
