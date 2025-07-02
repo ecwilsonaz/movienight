@@ -151,9 +151,17 @@ function showCurrentViewers() {
           if (viewerState.buffering) {
             syncStatus = ' 🔄';
           } else {
-            // Simple check: same play state and reasonable time difference
+            // Simple check: same play state and account for server state progression
             const playSync = viewerState.isPlaying === currentState.isPlaying;
-            const timeDiff = Math.abs(viewerState.currentTime - currentState.currentTime);
+            
+            // Account for time progression since last server state update
+            let expectedServerTime = currentState.currentTime;
+            if (currentState.isPlaying) {
+              const timeSinceServerUpdate = (Date.now() - currentState.lastUpdate) / 1000;
+              expectedServerTime = currentState.currentTime + timeSinceServerUpdate;
+            }
+            
+            const timeDiff = Math.abs(viewerState.currentTime - expectedServerTime);
             const tolerance = viewerState.networkQuality === 'poor' ? 5.0 : 
                              viewerState.networkQuality === 'fair' ? 3.0 : 2.0;
             
@@ -195,7 +203,15 @@ function showCurrentViewers() {
     } else {
       // Fresh data - check sync status
       const playSync = state.isPlaying === currentState.isPlaying;
-      const timeDiff = Math.abs(state.currentTime - currentState.currentTime);
+      
+      // Account for time progression since last server state update
+      let expectedServerTime = currentState.currentTime;
+      if (currentState.isPlaying) {
+        const timeSinceServerUpdate = (Date.now() - currentState.lastUpdate) / 1000;
+        expectedServerTime = currentState.currentTime + timeSinceServerUpdate;
+      }
+      
+      const timeDiff = Math.abs(state.currentTime - expectedServerTime);
       const tolerance = state.networkQuality === 'poor' ? 5.0 : 
                        state.networkQuality === 'fair' ? 3.0 : 2.0;
       
