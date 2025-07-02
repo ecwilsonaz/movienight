@@ -712,7 +712,7 @@ io.on('connection', async (socket) => {
       
       // Broadcast to all other clients
       socket.broadcast.emit('fullStateSync', data);
-      console.log(\`📡 Admin full state broadcast: \${data.isPlaying ? 'playing' : 'paused'} at \${data.currentTime.toFixed(1)}s\`);
+      console.log(`📡 Admin full state broadcast: ${data.isPlaying ? 'playing' : 'paused'} at ${data.currentTime.toFixed(1)}s`);
     }
   });
 
