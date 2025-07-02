@@ -147,8 +147,8 @@ function showCurrentViewers() {
         
         const timeDiff = Math.abs(viewerState.currentTime - expectedTime);
         const playSync = viewerState.isPlaying === currentState.isPlaying;
-        const tolerance = viewerState.networkQuality === 'poor' ? 2.0 : 
-                         viewerState.networkQuality === 'fair' ? 1.0 : 0.5;
+        const tolerance = viewerState.networkQuality === 'poor' ? 5.0 : 
+                         viewerState.networkQuality === 'fair' ? 3.0 : 2.0;
         
         if (timeDiff <= tolerance && playSync) {
           syncStatus = ' ✅';
@@ -179,8 +179,8 @@ function showCurrentViewers() {
     }
     
     const timeDiff = Math.abs(state.currentTime - expectedTime);
-    const tolerance = state.networkQuality === 'poor' ? 2.0 : 
-                     state.networkQuality === 'fair' ? 1.0 : 0.5;
+    const tolerance = state.networkQuality === 'poor' ? 5.0 : 
+                     state.networkQuality === 'fair' ? 3.0 : 2.0;
     return timeDiff <= tolerance && state.isPlaying === currentState.isPlaying;
   });
   
@@ -888,8 +888,8 @@ io.on('connection', async (socket) => {
       // Check if viewer is out of sync
       const timeDiff = Math.abs(data.currentTime - expectedTime);
       const playStateMismatch = data.isPlaying !== currentState.isPlaying;
-      const tolerance = data.networkQuality === 'poor' ? 2.0 : 
-                       data.networkQuality === 'fair' ? 1.0 : 0.5;
+      const tolerance = data.networkQuality === 'poor' ? 5.0 : 
+                       data.networkQuality === 'fair' ? 3.0 : 2.0;
       
       // Only resync if significantly out of sync (increase tolerance to reduce false positives)
       const resyncTolerance = tolerance * 2; // Double the tolerance for automatic resyncs
