@@ -162,11 +162,8 @@ function showCurrentViewers() {
             }
             
             const timeDiff = Math.abs(viewerState.currentTime - expectedServerTime);
-            const tolerance = viewerState.networkQuality === 'poor' ? 5.0 : 
-                             viewerState.networkQuality === 'fair' ? 3.0 : 2.0;
-            
-            // Debug logging
-            console.log(`🔍 Sync check: viewer=${viewerState.currentTime.toFixed(1)}s, server=${currentState.currentTime.toFixed(1)}s, expected=${expectedServerTime.toFixed(1)}s, diff=${timeDiff.toFixed(1)}s, tolerance=${tolerance}s`);
+            const tolerance = viewerState.networkQuality === 'poor' ? 10.0 : 
+                             viewerState.networkQuality === 'fair' ? 8.0 : 5.0;
             
             if (timeDiff <= tolerance && playSync) {
               syncStatus = ' ✅';
@@ -215,8 +212,8 @@ function showCurrentViewers() {
       }
       
       const timeDiff = Math.abs(state.currentTime - expectedServerTime);
-      const tolerance = state.networkQuality === 'poor' ? 5.0 : 
-                       state.networkQuality === 'fair' ? 3.0 : 2.0;
+      const tolerance = state.networkQuality === 'poor' ? 10.0 : 
+                       state.networkQuality === 'fair' ? 8.0 : 5.0;
       
       if (timeDiff <= tolerance && playSync && !state.buffering) {
         freshInSync++;
