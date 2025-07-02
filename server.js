@@ -103,10 +103,20 @@ function loadSessionConfig() {
   try {
     const configData = fs.readFileSync('./session.json', 'utf8');
     sessionConfig = JSON.parse(configData);
-    console.log(`Loaded session: ${sessionConfig.slug}`);
+    
+    // Validate configuration
+    if (sessionConfig.videoFormats) {
+      const formats = Object.keys(sessionConfig.videoFormats);
+      console.log(`Loaded session: ${sessionConfig.slug} with formats: ${formats.join(', ')}`);
+    } else if (sessionConfig.videoUrl) {
+      console.log(`Loaded session: ${sessionConfig.slug} with single video: ${sessionConfig.videoUrl}`);
+    } else {
+      throw new Error('No video configuration found (need videoFormats or videoUrl)');
+    }
   } catch (error) {
     console.error('Error loading session.json:', error.message);
     console.log('Please ensure session.json exists and is valid JSON');
+    console.log('Required format: {"videoFormats": {"mp4": "url"}, "slug": "name", "startTime": 0}');
     process.exit(1);
   }
 }
@@ -235,8 +245,71 @@ loadSessionConfig();
 
 app.use(express.static('public'));
 
+// Browser detection function
+function detectBrowser(userAgent) {
+  const ua = userAgent.toLowerCase();
+  
+  if (ua.includes('safari') && !ua.includes('chrome')) {
+    return 'safari';
+  } else if (ua.includes('firefox')) {
+    return 'firefox';
+  } else if (ua.includes('edge')) {
+    return 'edge';
+  } else if (ua.includes('chrome')) {
+    return 'chrome';
+  }
+  return 'unknown';
+}
+
+// Get optimal video format for browser
+function getOptimalVideoFormat(browser, videoFormats) {
+  // Format priority by browser
+  const formatPriority = {
+    safari: ['hevc', 'mp4', 'webm'],     // Safari prefers HEVC, falls back to H.264
+    chrome: ['webm', 'mp4', 'hevc'],     // Chrome prefers WebM
+    firefox: ['webm', 'mp4'],            // Firefox doesn't support HEVC
+    edge: ['mp4', 'webm', 'hevc'],       // Edge prefers H.264
+    unknown: ['mp4', 'webm']             // Default to universal H.264
+  };
+  
+  const priorities = formatPriority[browser] || formatPriority.unknown;
+  
+  for (const format of priorities) {
+    if (videoFormats[format]) {
+      return {
+        url: videoFormats[format],
+        format: format,
+        mimeType: format === 'hevc' ? 'video/mp4; codecs="hvc1"' :
+                  format === 'mp4' ? 'video/mp4' : 'video/webm'
+      };
+    }
+  }
+  
+  // Fallback to first available format
+  const firstFormat = Object.keys(videoFormats)[0];
+  return {
+    url: videoFormats[firstFormat],
+    format: firstFormat,
+    mimeType: firstFormat === 'webm' ? 'video/webm' : 'video/mp4'
+  };
+}
+
 app.get(`/${sessionConfig.slug}`, (req, res) => {
   const isAdmin = req.query.admin !== undefined;
+  const userAgent = req.headers['user-agent'] || '';
+  const browser = detectBrowser(userAgent);
+  
+  // Support both old videoUrl format and new videoFormats
+  let videoFormats = sessionConfig.videoFormats;
+  if (!videoFormats && sessionConfig.videoUrl) {
+    // Backward compatibility: convert old format
+    const ext = sessionConfig.videoUrl.split('.').pop();
+    videoFormats = { [ext]: sessionConfig.videoUrl };
+  }
+  
+  const optimalVideo = getOptimalVideoFormat(browser, videoFormats);
+  
+  console.log(`🎥 ${browser} client requested ${sessionConfig.slug}, serving ${optimalVideo.format} format`);
   
   const html = `<!DOCTYPE html>
 <html>
@@ -253,8 +326,13 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
     </style>
 </head>
 <body>
-    <video id="video" controls autoplay muted crossorigin="anonymous">
-        <source src="${sessionConfig.videoUrl}" type="video/webm">
+    <video id="video" controls ${browser === 'safari' ? 'playsinline' : ''} muted crossorigin="anonymous" preload="metadata">
+        ${Object.entries(videoFormats).map(([format, url]) => {
+          const mimeType = format === 'hevc' ? 'video/mp4; codecs="hvc1"' :
+                          format === 'mp4' ? 'video/mp4' : 'video/webm';
+          return `<source src="${url}" type="${mimeType}">`;
+        }).join('\n        ')}
+        <p>Your browser doesn't support any of the available video formats.</p>
     </video>
     <div id="status" class="status">${isAdmin ? 'ADMIN' : 'VIEWER'}</div>
     ${!isAdmin ? '<div class="viewer-notice">Playback controlled by admin</div>' : ''}
@@ -269,6 +347,13 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         let syncInProgress = false;
         let pendingSync = null;
         let videoReady = false;
+        
+        // Browser detection
+        const browser = '${browser}';
+        const isSafari = browser === 'safari';
+        const optimalFormat = '${optimalVideo.format}';
+        
+        console.log(\`Browser: \${browser}, optimal format: \${optimalFormat}\`);
         
         // Network quality adaptation
         let networkQuality = 'good'; // excellent, good, fair, poor
@@ -365,10 +450,28 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             status.textContent = (isAdmin ? 'ADMIN' : 'VIEWER') + ' ' + indicator;
         }
 
-        // Video ready detection
+        // Safari-specific autoplay handling
+        if (isSafari) {
+            // Safari requires user interaction for autoplay, even when muted
+            video.addEventListener('canplaythrough', () => {
+                if (!isAdmin) {
+                    // For Safari viewers, we'll handle autoplay more carefully
+                    video.muted = true;
+                }
+            });
+        }
+
+        // Video ready detection with Safari-specific handling
         video.addEventListener('loadeddata', () => {
             videoReady = true;
-            console.log('Video ready for sync');
+            console.log(\`Video ready for sync (format: \${optimalFormat})\`);
+            
+            // Safari-specific initialization
+            if (isSafari && !isAdmin) {
+                // Ensure Safari viewers start muted and ready
+                video.muted = true;
+                video.currentTime = ${sessionConfig.startTime || 0};
+            }
             
             // Apply pending sync if we have one
             if (pendingSync) {
@@ -400,10 +503,22 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 
                 console.log(\`Sync attempt \${attempts}/\${settings.maxRetries}: \${data.type} at \${data.currentTime}s (\${networkQuality})\`);
                 
-                // Apply the sync
+                // Apply the sync with Safari-specific handling
                 video.currentTime = data.currentTime;
                 if (data.type === 'play' || data.isPlaying) {
-                    video.play().catch(e => console.log('Play failed:', e));
+                    // Safari may need user interaction for first play
+                    const playPromise = video.play();
+                    if (playPromise !== undefined) {
+                        playPromise.catch(e => {
+                            if (isSafari && e.name === 'NotAllowedError') {
+                                console.log('Safari requires user interaction for autoplay');
+                                // Show a play button overlay for Safari users
+                                showSafariPlayButton();
+                            } else {
+                                console.log('Play failed:', e);
+                            }
+                        });
+                    }
                 } else if (data.type === 'pause' || data.isPlaying === false) {
                     video.pause();
                 }
@@ -433,6 +548,43 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             };
             
             trySync();
+        }
+
+        // Safari play button helper
+        function showSafariPlayButton() {
+            if (!document.getElementById('safari-play-overlay')) {
+                const overlay = document.createElement('div');
+                overlay.id = 'safari-play-overlay';
+                overlay.style.cssText = \`
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0,0,0,0.8);
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    z-index: 1000;
+                    color: white;
+                    font-family: sans-serif;
+                    cursor: pointer;
+                \`;
+                overlay.innerHTML = '<div style="text-align: center;"><div style="font-size: 48px;">▶️</div><div>Tap to enable video playback</div></div>';
+                
+                overlay.addEventListener('click', () => {
+                    video.play().then(() => {
+                        overlay.remove();
+                    }).catch(e => console.log('Manual play failed:', e));
+                });
+                
+                document.body.appendChild(overlay);
+                
+                // Auto-remove after 10 seconds
+                setTimeout(() => {
+                    if (overlay.parentNode) overlay.remove();
+                }, 10000);
+            }
         }
 
         // Prevent viewer interactions while preserving volume controls
@@ -508,6 +660,14 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         }
 
         if (isAdmin) {
+            // Safari admin may need initial user interaction
+            if (isSafari) {
+                video.addEventListener('loadedmetadata', () => {
+                    // Safari admin starts paused, requiring manual play
+                    console.log('Safari admin: Video loaded, ready for manual control');
+                });
+            }
+            
             video.addEventListener('play', () => {
                 socket.emit('control', { type: 'play', currentTime: video.currentTime });
             });
