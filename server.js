@@ -672,6 +672,9 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                         const prepTime = Math.max(targetTime - 0.1, 0); // 100ms earlier, but not negative
                         video.currentTime = prepTime;
                         
+                        // Clear syncInProgress immediately for iOS Safari to prevent seek blocking
+                        syncInProgress = false;
+                        
                         // Step 2: Wait for seek to settle, then fine-tune position and play
                         setTimeout(() => {
                             // Fine-tune to exact position after pre-positioning
@@ -684,8 +687,6 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                                     if (e.name === 'NotAllowedError') {
                                         console.log('iOS Safari unpause requires user interaction for autoplay');
                                         showSafariPlayButton();
-                                        // Mark as successful to prevent retries during user interaction
-                                        syncInProgress = false;
                                     } else {
                                         console.log('iOS Safari unpause play failed:', e);
                                     }
@@ -714,6 +715,9 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                             video.pause();
                         }
                     }
+                    
+                    // Clear syncInProgress immediately after video operations to prevent seek blocking
+                    syncInProgress = false;
                 };
 
                 // iOS Safari needs longer delays for video pipeline processing
@@ -730,14 +734,13 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                     const timeDiff = Math.abs(video.currentTime - data.currentTime);
                     
                     if (timeDiff > settings.tolerance && attempts < settings.maxRetries) {
-                        console.log(\`Sync failed (diff: \${timeDiff.toFixed(1)}s > \${settings.tolerance}s), retrying...\`);
+                        console.log('Sync failed (diff: ' + timeDiff.toFixed(1) + 's > ' + settings.tolerance + 's), retrying...');
                         trySync();
                     } else {
-                        syncInProgress = false;
                         if (timeDiff <= settings.tolerance) {
-                            console.log(\`Sync successful (diff: \${timeDiff.toFixed(1)}s)\`);
+                            console.log('Sync successful (diff: ' + timeDiff.toFixed(1) + 's)');
                         } else {
-                            console.log(\`Sync gave up after \${attempts} attempts (final diff: \${timeDiff.toFixed(1)}s)\`);
+                            console.log('Sync gave up after ' + attempts + ' attempts (final diff: ' + timeDiff.toFixed(1) + 's)');
                         }
                         
                         // Update tracking variables for viewers
