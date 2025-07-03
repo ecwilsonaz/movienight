@@ -673,8 +673,18 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                         video.currentTime = prepTime;
                         
                         // Clear syncInProgress after iOS Safari operations settle
-                        const isPlayPause = data.type === 'play' || data.type === 'pause';
-                        const delay = isPlayPause ? 300 : 150; // Even longer for iOS Safari play/pause
+                        let delay;
+                        if (data.type === 'play' || data.type === 'pause') {
+                            delay = 300; // iOS Safari play/pause operations
+                        } else if (data.type === 'seek') {
+                            // For iOS Safari seeks, use even longer delays for large time jumps
+                            const currentTime = video.currentTime || 0;
+                            const timeDiff = Math.abs(data.currentTime - currentTime);
+                            delay = timeDiff > 60 ? 600 : 300; // 600ms for jumps >1 minute, 300ms otherwise
+                        } else {
+                            delay = 300; // Default for iOS Safari
+                        }
+                        
                         setTimeout(() => {
                             syncInProgress = false;
                         }, delay);
@@ -720,9 +730,19 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                         }
                     }
                     
-                    // Clear syncInProgress after video events settle (longer for pause/unpause)
-                    const isPlayPause = data.type === 'play' || data.type === 'pause';
-                    const delay = isPlayPause ? 200 : 150; // Longer delay for play/pause operations
+                    // Clear syncInProgress after video events settle - use longer delays for large seeks
+                    let delay;
+                    if (data.type === 'play' || data.type === 'pause') {
+                        delay = 200; // Play/pause operations
+                    } else if (data.type === 'seek') {
+                        // For seeks, use longer delay for large time jumps
+                        const currentTime = video.currentTime || 0;
+                        const timeDiff = Math.abs(data.currentTime - currentTime);
+                        delay = timeDiff > 60 ? 400 : 200; // 400ms for jumps >1 minute, 200ms otherwise
+                    } else {
+                        delay = 200; // Default
+                    }
+                    
                     setTimeout(() => {
                         syncInProgress = false;
                     }, delay);
