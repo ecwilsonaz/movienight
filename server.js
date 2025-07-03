@@ -1199,8 +1199,43 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             }
         }
 
+        // iOS Safari admin command deduplication
+        let recentAdminCommands = [];
+        const ADMIN_COMMAND_DEDUP_WINDOW = 5000; // 5 seconds
+        
+        function isDuplicateAdminCommand(data) {
+            if (!isIOSSafari) return false; // Only apply to iOS Safari
+            
+            const now = Date.now();
+            const commandKey = `${data.type}-${data.currentTime.toFixed(3)}`;
+            
+            // Clean old commands
+            recentAdminCommands = recentAdminCommands.filter(cmd => now - cmd.timestamp < ADMIN_COMMAND_DEDUP_WINDOW);
+            
+            // Check for duplicate
+            const isDuplicate = recentAdminCommands.some(cmd => cmd.key === commandKey);
+            
+            if (!isDuplicate) {
+                // Store new command
+                recentAdminCommands.push({
+                    key: commandKey,
+                    timestamp: now,
+                    type: data.type,
+                    currentTime: data.currentTime
+                });
+            }
+            
+            return isDuplicate;
+        }
+        
         socket.on('control', (data) => {
             if (!isAdmin && !syncInProgress) {
+                // Check for iOS Safari duplicate commands
+                if (isDuplicateAdminCommand(data)) {
+                    console.log(\`iOS Safari: Ignoring duplicate admin command: \${data.type} at \${data.currentTime.toFixed(3)}s\`);
+                    return; // Skip duplicate command
+                }
+                
                 console.log('Received admin control:', data.type);
                 applySync(data);
                 
