@@ -375,6 +375,8 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         let syncInProgress = false;
         let pendingSync = null;
         let videoReady = false;
+        let syncFailureCount = 0;
+        let emergencyBypassActive = false;
         
         // Browser detection
         const browser = '${browser}';
@@ -680,7 +682,15 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                             // For iOS Safari seeks, use even longer delays for large time jumps
                             const currentTime = video.currentTime || 0;
                             const timeDiff = Math.abs(data.currentTime - currentTime);
-                            delay = timeDiff > 60 ? 600 : 300; // 600ms for jumps >1 minute, 300ms otherwise
+                            if (timeDiff > 600) {
+                                delay = 2000; // 2s for jumps >10 minutes on iOS Safari
+                            } else if (timeDiff > 300) {
+                                delay = 1500; // 1.5s for jumps >5 minutes
+                            } else if (timeDiff > 60) {
+                                delay = 800; // 800ms for jumps >1 minute
+                            } else {
+                                delay = 300; // 300ms for small jumps
+                            }
                         } else {
                             delay = 300; // Default for iOS Safari
                         }
@@ -688,6 +698,15 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                         setTimeout(() => {
                             syncInProgress = false;
                         }, delay);
+                        
+                        // Enhanced logging for large seeks on iOS Safari
+                        if (data.type === 'seek') {
+                            const currentTime = video.currentTime || 0;
+                            const timeDiff = Math.abs(data.currentTime - currentTime);
+                            if (timeDiff > 300) { // Log large seeks
+                                console.log('🔍 iOS SAFARI LARGE SEEK: ' + currentTime.toFixed(1) + 's → ' + data.currentTime.toFixed(1) + 's (jump: ' + timeDiff.toFixed(1) + 's, delay: ' + delay + 'ms)');
+                            }
+                        }
                         
                         // Step 2: Wait for seek to settle, then fine-tune position and play
                         setTimeout(() => {
@@ -735,10 +754,18 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                     if (data.type === 'play' || data.type === 'pause') {
                         delay = 200; // Play/pause operations
                     } else if (data.type === 'seek') {
-                        // For seeks, use longer delay for large time jumps
+                        // For seeks, use dramatically longer delays for very large time jumps
                         const currentTime = video.currentTime || 0;
                         const timeDiff = Math.abs(data.currentTime - currentTime);
-                        delay = timeDiff > 60 ? 400 : 200; // 400ms for jumps >1 minute, 200ms otherwise
+                        if (timeDiff > 600) {
+                            delay = 1500; // 1.5s for jumps >10 minutes
+                        } else if (timeDiff > 300) {
+                            delay = 1000; // 1s for jumps >5 minutes
+                        } else if (timeDiff > 60) {
+                            delay = 500; // 500ms for jumps >1 minute
+                        } else {
+                            delay = 200; // 200ms for small jumps
+                        }
                     } else {
                         delay = 200; // Default
                     }
@@ -746,6 +773,15 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                     setTimeout(() => {
                         syncInProgress = false;
                     }, delay);
+                    
+                    // Enhanced logging for large seeks
+                    if (data.type === 'seek') {
+                        const currentTime = video.currentTime || 0;
+                        const timeDiff = Math.abs(data.currentTime - currentTime);
+                        if (timeDiff > 300) { // Log large seeks
+                            console.log('🔍 LARGE SEEK: ' + currentTime.toFixed(1) + 's → ' + data.currentTime.toFixed(1) + 's (jump: ' + timeDiff.toFixed(1) + 's, delay: ' + delay + 'ms)');
+                        }
+                    }
                 };
 
                 // iOS Safari needs longer delays for video pipeline processing
@@ -763,12 +799,27 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                     
                     if (timeDiff > settings.tolerance && attempts < settings.maxRetries) {
                         console.log('Sync failed (diff: ' + timeDiff.toFixed(1) + 's > ' + settings.tolerance + 's), retrying...');
+                        syncFailureCount++;
                         trySync();
                     } else {
                         if (timeDiff <= settings.tolerance) {
                             console.log('Sync successful (diff: ' + timeDiff.toFixed(1) + 's)');
+                            syncFailureCount = 0; // Reset failure count on success
                         } else {
                             console.log('Sync gave up after ' + attempts + ' attempts (final diff: ' + timeDiff.toFixed(1) + 's)');
+                            syncFailureCount++;
+                            
+                            // Emergency bypass: if we have too many failures, disable seek blocking temporarily
+                            if (syncFailureCount >= 3 && !emergencyBypassActive) {
+                                console.log('🚨 EMERGENCY BYPASS: Disabling seek blocking due to repeated sync failures');
+                                emergencyBypassActive = true;
+                                // Re-enable after 10 seconds
+                                setTimeout(() => {
+                                    emergencyBypassActive = false;
+                                    syncFailureCount = 0;
+                                    console.log('✅ Emergency bypass ended - seek blocking re-enabled');
+                                }, 10000);
+                            }
                         }
                         
                         // Update tracking variables for viewers
@@ -859,8 +910,17 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             const SEEK_BLOCK_COOLDOWN = 100; // Max once per 100ms
             
             video.addEventListener('seeking', (e) => {
-                if (!syncInProgress) {
+                if (!syncInProgress && !emergencyBypassActive) {
                     const now = Date.now();
+                    
+                    // Check for extreme drift - if drift >5 minutes, allow seeks to fix it
+                    if (lastValidTime && video.currentTime) {
+                        const currentDrift = Math.abs(video.currentTime - lastValidTime);
+                        if (currentDrift > 300) { // >5 minutes drift
+                            console.log('🚨 EXTREME DRIFT DETECTED (' + currentDrift.toFixed(1) + 's) - allowing seek to fix sync');
+                            return; // Allow the seek to proceed
+                        }
+                    }
                     
                     // Throttle seek blocking to prevent feedback loop
                     if (now - lastSeekBlock < SEEK_BLOCK_COOLDOWN) {
