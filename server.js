@@ -301,9 +301,28 @@ function getOptimalVideoFormat(browser, videoFormats) {
 }
 
 app.get(`/${sessionConfig.slug}`, (req, res) => {
-  const isAdmin = req.query.admin !== undefined;
+  const requestingAdmin = req.query.admin !== undefined;
+  const providedPassword = req.query.pw;
   const userAgent = req.headers['user-agent'] || '';
   const browser = detectBrowser(userAgent);
+  
+  // Validate admin access with optional password
+  let isAdmin = false;
+  let adminError = null;
+  
+  if (requestingAdmin) {
+    if (sessionConfig.adminPassword) {
+      // Password is configured - require it
+      if (providedPassword === sessionConfig.adminPassword) {
+        isAdmin = true;
+      } else {
+        adminError = providedPassword ? 'incorrect_password' : 'password_required';
+      }
+    } else {
+      // No password configured - grant admin access
+      isAdmin = true;
+    }
+  }
   
   // Support both old videoUrl format and new videoFormats
   let videoFormats = sessionConfig.videoFormats;
@@ -401,6 +420,7 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         const video = document.getElementById('video');
         const status = document.getElementById('status');
         const originallyAdmin = ${isAdmin}; // Store original admin intent
+        const adminError = '${adminError || ''}'; // Password validation error
         let isAdmin = ${isAdmin};
         let lastHeartbeat = Date.now();
         let syncInProgress = false;
@@ -1627,6 +1647,28 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         socket.on('connect', () => {
             console.log('✅ Connected to server, transport:', socket.io.engine.transport.name);
             console.log('Socket ID:', socket.id);
+            
+            // Handle admin password errors immediately
+            if (adminError) {
+                if (adminError === 'password_required') {
+                    status.textContent = 'VIEWER - Password Required';
+                    console.log('❌ Admin access denied: Password required for admin access');
+                } else if (adminError === 'incorrect_password') {
+                    status.textContent = 'VIEWER - Wrong Password';
+                    console.log('❌ Admin access denied: Incorrect admin password');
+                }
+                
+                const notice = document.querySelector('.viewer-notice');
+                if (notice) {
+                    notice.textContent = adminError === 'password_required' ? 
+                        'Admin password required: ?admin&pw=password' : 
+                        'Incorrect admin password provided';
+                    notice.style.color = '#ff6b6b';
+                }
+                
+                isAdmin = false;
+                return; // Don't proceed with join request
+            }
             
             // Log transport changes
             socket.io.engine.on('upgrade', () => {
