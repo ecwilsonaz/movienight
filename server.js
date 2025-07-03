@@ -1036,9 +1036,10 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         
         video.addEventListener('suspend', (e) => {
             const now = Date.now();
-            console.log('🔋 Video suspended - iOS power management (' + browser + ')');
+            console.log('🔋 Video suspended (' + browser + ')');
             
             if (isIOSSafari) {
+                console.log('iOS Safari: Power management suspension detected');
                 // Track suspend event frequency for debugging
                 suspendEventCount++;
                 
