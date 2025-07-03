@@ -339,6 +339,28 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         ` : ''}
         .status { position: fixed; top: 10px; right: 10px; color: white; font-family: monospace; background: rgba(0,0,0,0.7); padding: 5px; }
         ${!isAdmin ? '.viewer-notice { position: fixed; bottom: 10px; left: 10px; color: #888; font-family: monospace; font-size: 12px; }' : ''}
+        ${!isAdmin ? `
+        /* Simple click notification */
+        .click-notification {
+            position: fixed;
+            top: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 107, 107, 0.9);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 14px;
+            z-index: 10000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+        }
+        .click-notification.show {
+            opacity: 1;
+        }
+        ` : ''}
     </style>
 </head>
 <body>
@@ -372,6 +394,7 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
     </video>
     <div id="status" class="status">${isAdmin ? 'ADMIN' : 'VIEWER'}</div>
     ${!isAdmin ? '<div class="viewer-notice">Playback controlled by admin</div>' : ''}
+    ${!isAdmin ? '<div id="clickNotification" class="click-notification">Video controls reserved for admin</div>' : ''}
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
@@ -883,6 +906,23 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         if (!isAdmin) {
             let lastValidTime = 0;
             let wasPlaying = false;
+            
+            // Simple click notification
+            let lastClickNotification = 0;
+            video.addEventListener('click', (e) => {
+                const now = Date.now();
+                // Throttle to show notification at most once every 2 seconds
+                if (now - lastClickNotification >= 2000) {
+                    const notification = document.getElementById('clickNotification');
+                    if (notification) {
+                        notification.classList.add('show');
+                        setTimeout(() => {
+                            notification.classList.remove('show');
+                        }, 2000); // Show for 2 seconds
+                        lastClickNotification = now;
+                    }
+                }
+            });
             
             video.addEventListener('play', (e) => {
                 if (!syncInProgress) {
