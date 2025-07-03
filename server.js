@@ -673,9 +673,11 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                         video.currentTime = prepTime;
                         
                         // Clear syncInProgress after iOS Safari operations settle
+                        const isPlayPause = data.type === 'play' || data.type === 'pause';
+                        const delay = isPlayPause ? 300 : 150; // Even longer for iOS Safari play/pause
                         setTimeout(() => {
                             syncInProgress = false;
-                        }, 150); // Longer delay for iOS Safari
+                        }, delay);
                         
                         // Step 2: Wait for seek to settle, then fine-tune position and play
                         setTimeout(() => {
@@ -718,10 +720,12 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                         }
                     }
                     
-                    // Clear syncInProgress after a brief delay to allow seek events to settle
+                    // Clear syncInProgress after video events settle (longer for pause/unpause)
+                    const isPlayPause = data.type === 'play' || data.type === 'pause';
+                    const delay = isPlayPause ? 200 : 100; // Longer delay for play/pause operations
                     setTimeout(() => {
                         syncInProgress = false;
-                    }, 50);
+                    }, delay);
                 };
 
                 // iOS Safari needs longer delays for video pipeline processing
