@@ -940,25 +940,41 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         let suspendedTimestamp = null;
         let suspensionRecoveryTimer = null;
         
+        // Debouncing for iOS Safari power management cycling
+        let suspendDebounceTimer = null;
+        let lastSuspendTime = 0;
+        let suspendEventCount = 0;
+        const SUSPEND_DEBOUNCE_WINDOW = 2000; // 2 second window
+        const MIN_SUSPEND_DURATION = 500; // Ignore suspensions shorter than 500ms
+        
         function clearSuspensionState(reason) {
             if (videoSuspended) {
+                const suspendDuration = suspendedTimestamp ? Date.now() - suspendedTimestamp : 0;
                 videoSuspended = false;
                 suspendedTimestamp = null;
                 if (suspensionRecoveryTimer) {
                     clearTimeout(suspensionRecoveryTimer);
                     suspensionRecoveryTimer = null;
                 }
-                console.log(\`iOS Safari: Video suspension cleared (\${reason})\`);
+                console.log('iOS Safari: Video suspension cleared (' + reason + ') after ' + suspendDuration + 'ms');
+            }
+            
+            // Also cancel any pending debounced suspension
+            if (suspendDebounceTimer) {
+                clearTimeout(suspendDebounceTimer);
+                suspendDebounceTimer = null;
+                console.log('iOS Safari: Cancelled pending suspension due to recovery');
             }
         }
         
-        video.addEventListener('suspend', (e) => {
-            console.log(\`🔋 Video suspended - iOS power management (\${browser})\`);
+        function debouncedSuspend() {
+            if (!isIOSSafari) return;
             
-            if (isIOSSafari) {
+            // Actually suspend operations after debounce period
+            if (!videoSuspended) {
                 videoSuspended = true;
                 suspendedTimestamp = Date.now();
-                console.log('iOS Safari: Video loading suspended, pausing sync operations');
+                console.log('iOS Safari: Video loading suspended (debounced), pausing sync operations');
                 
                 // Set recovery timeout - force resume after 5 seconds if no recovery event
                 if (suspensionRecoveryTimer) {
@@ -971,6 +987,48 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                         clearSuspensionState('timeout');
                     }
                 }, 5000);
+            }
+        }
+        
+        video.addEventListener('suspend', (e) => {
+            const now = Date.now();
+            console.log('🔋 Video suspended - iOS power management (' + browser + ')');
+            
+            if (isIOSSafari) {
+                // Track suspend event frequency for debugging
+                suspendEventCount++;
+                
+                // Reset counter if enough time has passed
+                if (now - lastSuspendTime > SUSPEND_DEBOUNCE_WINDOW) {
+                    suspendEventCount = 1;
+                }
+                lastSuspendTime = now;
+                
+                // Log if we're seeing rapid suspend events
+                if (suspendEventCount > 1) {
+                    console.log('iOS Safari: Rapid suspend events (' + suspendEventCount + ' in ' + (now - (lastSuspendTime - SUSPEND_DEBOUNCE_WINDOW)) + 'ms)');
+                }
+                
+                // Clear any existing debounce timer
+                if (suspendDebounceTimer) {
+                    clearTimeout(suspendDebounceTimer);
+                }
+                
+                // Only suspend if this seems like a sustained suspension
+                // For rapid cycling, wait to see if it settles
+                if (suspendEventCount === 1) {
+                    // First suspend event - start immediately but be ready to cancel
+                    suspendDebounceTimer = setTimeout(debouncedSuspend, MIN_SUSPEND_DURATION);
+                } else {
+                    // Multiple rapid events - use longer debounce
+                    console.log('iOS Safari: Debouncing rapid suspend events');
+                    suspendDebounceTimer = setTimeout(debouncedSuspend, SUSPEND_DEBOUNCE_WINDOW);
+                }
+            } else {
+                // Non-iOS Safari - original immediate behavior
+                videoSuspended = true;
+                suspendedTimestamp = now;
+                console.log('Video loading suspended, pausing sync operations');
             }
         });
         
