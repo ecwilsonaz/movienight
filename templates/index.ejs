@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Movie Night</title>
+    <link rel="stylesheet" href="/css/styles.css">
+    <% if (!isAdmin) { %>
+    <style>
+        /* Apply viewer controls styling conditionally */
+        body {
+            /* Disable interactive Safari controls for viewers but keep progress bar visible */
+        }
+        video::-webkit-media-controls-play-button, 
+        video::-webkit-media-controls-start-playback-button { 
+            display: none !important; 
+        }
+        video::-webkit-media-controls-timeline { 
+            pointer-events: none !important; 
+        }
+        video::-webkit-media-controls-seek-back-button { 
+            display: none !important; 
+        }
+        video::-webkit-media-controls-seek-forward-button { 
+            display: none !important; 
+        }
+        video::-webkit-media-controls-rewind-button { 
+            display: none !important; 
+        }
+        video::-webkit-media-controls-return-to-realtime-button { 
+            display: none !important; 
+        }
+    </style>
+    <% } %>
+</head>
+<body>
+    <video id="video" controls <% if (browser === 'safari' || browser === 'ios-safari') { %>playsinline<% } %> muted crossorigin="anonymous" preload="auto">
+        <%- generateVideoSources %>
+        <p>Your browser doesn't support any of the available video formats.</p>
+    </video>
+    <div id="status" class="status"><%= isAdmin ? 'ADMIN' : 'VIEWER' %></div>
+    <% if (!isAdmin) { %>
+    <div class="viewer-notice">Playback controlled by admin</div>
+    <div id="clickNotification" class="click-notification">Video controls reserved for admin</div>
+    <% } %>
+    
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/networkMonitoring.js"></script>
+    <script src="/js/videoSync.js"></script>
+    <script src="/js/browserHandlers.js"></script>
+    <% if (browser === 'ios-safari') { %>
+    <script src="/js/safariSpecific.js"></script>
+    <% } %>
+    <script src="/js/client.js"></script>
+    <script>
+        // Initialize the client with server configuration
+        const movieNightClient = new MovieNightClient({
+            isAdmin: <%= isAdmin %>,
+            adminError: '<%= adminError || '' %>',
+            browser: '<%= browser %>',
+            optimalFormat: '<%= optimalVideo.format %>',
+            startTime: <%= sessionConfig.startTime || 0 %>
+        });
+    </script>
+</body>
+</html>
