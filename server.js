@@ -328,14 +328,19 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
         video { max-width: 100%; max-height: 100vh; }
         ${!isAdmin ? `
-        /* Disable interactive Safari controls for viewers but keep progress bar visible */
-        video::-webkit-media-controls-play-button, 
-        video::-webkit-media-controls-start-playback-button { display: none !important; }
+        /* Disable entire Safari control panel interaction for viewers */
+        video::-webkit-media-controls-panel { pointer-events: none !important; }
+        
+        /* Re-enable safe controls */
+        video::-webkit-media-controls-volume-slider { pointer-events: auto !important; }
+        video::-webkit-media-controls-mute-button { pointer-events: auto !important; }
+        video::-webkit-media-controls-fullscreen-button { pointer-events: auto !important; }
+        video::-webkit-media-controls-volume-slider-container { pointer-events: auto !important; }
+        
+        /* Keep progress bar visible but non-interactive */
         video::-webkit-media-controls-timeline { pointer-events: none !important; }
-        video::-webkit-media-controls-seek-back-button { display: none !important; }
-        video::-webkit-media-controls-seek-forward-button { display: none !important; }
-        video::-webkit-media-controls-rewind-button { display: none !important; }
-        video::-webkit-media-controls-return-to-realtime-button { display: none !important; }
+        video::-webkit-media-controls-current-time-display { pointer-events: none !important; }
+        video::-webkit-media-controls-time-remaining-display { pointer-events: none !important; }
         ` : ''}
         .status { position: fixed; top: 10px; right: 10px; color: white; font-family: monospace; background: rgba(0,0,0,0.7); padding: 5px; }
         ${!isAdmin ? '.viewer-notice { position: fixed; bottom: 10px; left: 10px; color: #888; font-family: monospace; font-size: 12px; }' : ''}
