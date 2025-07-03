@@ -1,6 +1,6 @@
 # Movie Night - Advanced Micro Watch Party
 
-Ultra-reliable synchronized video viewing for up to 5 people with real-time monitoring and automatic sync correction.
+Ultra-reliable synchronized video viewing for 20+ people with real-time monitoring and automatic sync correction.
 
 ## 🚀 Quick Setup
 
