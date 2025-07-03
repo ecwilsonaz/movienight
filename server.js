@@ -327,8 +327,16 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
     <style>
         body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
         video { max-width: 100%; max-height: 100vh; }
-        ${!isAdmin ? 'video::-webkit-media-controls-play-button, video::-webkit-media-controls-start-playback-button { display: none !important; }' : ''}
-        ${!isAdmin ? 'video::-webkit-media-controls-timeline { pointer-events: none !important; }' : ''}
+        ${!isAdmin ? `
+        /* Disable interactive Safari controls for viewers but keep progress bar visible */
+        video::-webkit-media-controls-play-button, 
+        video::-webkit-media-controls-start-playback-button { display: none !important; }
+        video::-webkit-media-controls-timeline { pointer-events: none !important; }
+        video::-webkit-media-controls-seek-back-button { display: none !important; }
+        video::-webkit-media-controls-seek-forward-button { display: none !important; }
+        video::-webkit-media-controls-rewind-button { display: none !important; }
+        video::-webkit-media-controls-return-to-realtime-button { display: none !important; }
+        ` : ''}
         .status { position: fixed; top: 10px; right: 10px; color: white; font-family: monospace; background: rgba(0,0,0,0.7); padding: 5px; }
         ${!isAdmin ? '.viewer-notice { position: fixed; bottom: 10px; left: 10px; color: #888; font-family: monospace; font-size: 12px; }' : ''}
     </style>
