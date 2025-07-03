@@ -722,7 +722,7 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                     
                     // Clear syncInProgress after video events settle (longer for pause/unpause)
                     const isPlayPause = data.type === 'play' || data.type === 'pause';
-                    const delay = isPlayPause ? 200 : 100; // Longer delay for play/pause operations
+                    const delay = isPlayPause ? 200 : 150; // Longer delay for play/pause operations
                     setTimeout(() => {
                         syncInProgress = false;
                     }, delay);
