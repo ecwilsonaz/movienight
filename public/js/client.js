@@ -38,6 +38,7 @@ class MovieNightClient {
     
     init() {
         console.log(`Browser: ${this.browser}, optimal format: ${this.optimalFormat}`);
+        console.log(`isIOSSafari: ${this.isIOSSafari}, isSafari: ${this.isSafari}`);
         
         // Setup video event listeners
         this.setupVideoEvents();
@@ -53,7 +54,10 @@ class MovieNightClient {
         
         // Initialize iOS warning if applicable
         if (this.isIOSSafari) {
+            console.log('iOS Warning: Should initialize for iOS Safari user');
             this.initIOSWarning();
+        } else {
+            console.log('iOS Warning: Skipping - not iOS Safari browser');
         }
         
         if (!this.isAdmin) {
@@ -64,41 +68,71 @@ class MovieNightClient {
     }
     
     initIOSWarning() {
+        console.log('iOS Warning: Initializing for iOS Safari');
+        
         const warningElement = document.getElementById('iosSyncWarning');
-        if (!warningElement) return;
+        if (!warningElement) {
+            console.log('iOS Warning: Warning element not found in DOM');
+            return;
+        }
+        
+        console.log('iOS Warning: Warning element found');
         
         // Check if user has already dismissed this warning in this session
         const warningDismissed = sessionStorage.getItem('iosSyncWarningDismissed');
+        console.log('iOS Warning: Previously dismissed?', warningDismissed);
+        
+        // For debugging: Clear sessionStorage to always show warning
+        sessionStorage.removeItem('iosSyncWarningDismissed');
+        console.log('iOS Warning: DEBUG - Cleared sessionStorage');
         
         if (!warningDismissed) {
+            console.log('iOS Warning: Showing warning in 1 second...');
+            
             // Show warning after a brief delay to let page settle
             setTimeout(() => {
+                console.log('iOS Warning: Adding show class');
                 warningElement.classList.add('show');
+                console.log('iOS Warning: Show class added, element classes:', warningElement.className);
+                
+                // Double-check that styles are applied
+                const computedStyle = window.getComputedStyle(warningElement);
+                console.log('iOS Warning: Computed opacity:', computedStyle.opacity);
+                console.log('iOS Warning: Computed transform:', computedStyle.transform);
             }, 1000);
             
             // Auto-hide after 15 seconds if not manually dismissed
             setTimeout(() => {
                 if (warningElement.classList.contains('show')) {
+                    console.log('iOS Warning: Auto-dismissing after 15 seconds');
                     this.dismissIOSWarning();
                 }
             }, 16000); // 1s delay + 15s display
+        } else {
+            console.log('iOS Warning: Skipping - already dismissed this session');
         }
     }
     
     dismissIOSWarning() {
+        console.log('iOS Warning: Dismissing warning');
         const warningElement = document.getElementById('iosSyncWarning');
         if (warningElement) {
+            console.log('iOS Warning: Removing show class');
             warningElement.classList.remove('show');
             
             // Store dismissal state for this session
             sessionStorage.setItem('iosSyncWarningDismissed', 'true');
+            console.log('iOS Warning: Stored dismissal in sessionStorage');
             
             // Remove element after animation completes
             setTimeout(() => {
                 if (warningElement.parentNode) {
+                    console.log('iOS Warning: Removing element from DOM');
                     warningElement.remove();
                 }
             }, 400); // Match CSS transition duration
+        } else {
+            console.log('iOS Warning: Warning element not found for dismissal');
         }
     }
     
