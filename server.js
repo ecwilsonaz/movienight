@@ -334,7 +334,7 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
     </style>
 </head>
 <body>
-    <video id="video" controls ${browser === 'safari' || browser === 'ios-safari' ? 'playsinline' : ''} muted crossorigin="anonymous" preload="metadata">
+    <video id="video" controls ${browser === 'safari' || browser === 'ios-safari' ? 'playsinline' : ''} muted crossorigin="anonymous" preload="auto">
         ${(() => {
           // Generate sources in browser priority order
           const formatPriority = {
