@@ -1207,7 +1207,7 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             if (!isIOSSafari) return false; // Only apply to iOS Safari
             
             const now = Date.now();
-            const commandKey = `${data.type}-${data.currentTime.toFixed(3)}`;
+            const commandKey = data.type + '-' + data.currentTime.toFixed(3);
             
             // Clean old commands
             recentAdminCommands = recentAdminCommands.filter(cmd => now - cmd.timestamp < ADMIN_COMMAND_DEDUP_WINDOW);
@@ -1232,7 +1232,7 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             if (!isAdmin && !syncInProgress) {
                 // Check for iOS Safari duplicate commands
                 if (isDuplicateAdminCommand(data)) {
-                    console.log(\`iOS Safari: Ignoring duplicate admin command: \${data.type} at \${data.currentTime.toFixed(3)}s\`);
+                    console.log('iOS Safari: Ignoring duplicate admin command: ' + data.type + ' at ' + data.currentTime.toFixed(3) + 's');
                     return; // Skip duplicate command
                 }
                 
