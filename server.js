@@ -327,45 +327,14 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
     <style>
         body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
         video { max-width: 100%; max-height: 100vh; }
-        ${!isAdmin ? `
-        /* Hide all Safari/WebKit media controls for viewers */
-        video::-webkit-media-controls-play-button, 
-        video::-webkit-media-controls-start-playback-button { display: none !important; }
-        video::-webkit-media-controls-timeline { pointer-events: none !important; }
-        video::-webkit-media-controls-current-time-display { display: none !important; }
-        video::-webkit-media-controls-time-remaining-display { display: none !important; }
-        video::-webkit-media-controls-seek-back-button { display: none !important; }
-        video::-webkit-media-controls-seek-forward-button { display: none !important; }
-        video::-webkit-media-controls-fullscreen-button { display: none !important; }
-        video::-webkit-media-controls-rewind-button { display: none !important; }
-        video::-webkit-media-controls-return-to-realtime-button { display: none !important; }
-        video::-webkit-media-controls-panel { pointer-events: none !important; }
-        ` : ''}
+        ${!isAdmin ? 'video::-webkit-media-controls-play-button, video::-webkit-media-controls-start-playback-button { display: none !important; }' : ''}
+        ${!isAdmin ? 'video::-webkit-media-controls-timeline { pointer-events: none !important; }' : ''}
         .status { position: fixed; top: 10px; right: 10px; color: white; font-family: monospace; background: rgba(0,0,0,0.7); padding: 5px; }
         ${!isAdmin ? '.viewer-notice { position: fixed; bottom: 10px; left: 10px; color: #888; font-family: monospace; font-size: 12px; }' : ''}
-        ${!isAdmin && browser === 'safari' ? `
-        /* Custom volume control for Safari desktop viewers */
-        .volume-control { 
-            position: fixed; 
-            top: 10px; 
-            left: 10px; 
-            background: rgba(0,0,0,0.7); 
-            padding: 10px; 
-            border-radius: 5px;
-            color: white;
-            font-family: monospace;
-            font-size: 12px;
-        }
-        .volume-slider { 
-            width: 100px; 
-            margin-left: 10px; 
-            vertical-align: middle;
-        }
-        ` : ''}
     </style>
 </head>
 <body>
-    <video id="video" ${isAdmin || browser !== 'safari' ? 'controls' : ''} ${browser === 'safari' || browser === 'ios-safari' ? 'playsinline' : ''} muted crossorigin="anonymous" preload="auto">
+    <video id="video" controls ${browser === 'safari' || browser === 'ios-safari' ? 'playsinline' : ''} muted crossorigin="anonymous" preload="auto">
         ${(() => {
           // Generate sources in browser priority order
           const formatPriority = {
@@ -395,7 +364,6 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
     </video>
     <div id="status" class="status">${isAdmin ? 'ADMIN' : 'VIEWER'}</div>
     ${!isAdmin ? '<div class="viewer-notice">Playback controlled by admin</div>' : ''}
-    ${!isAdmin && browser === 'safari' ? '<div class="volume-control">🔊 <input type="range" class="volume-slider" min="0" max="1" step="0.1" value="1" id="volumeSlider"></div>' : ''}
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
@@ -1650,21 +1618,6 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 pingInterval = null;
             }
         });
-        
-        // Safari desktop viewer volume control
-        if (!isAdmin && browser === 'safari') {
-            const volumeSlider = document.getElementById('volumeSlider');
-            if (volumeSlider) {
-                volumeSlider.addEventListener('input', (e) => {
-                    video.volume = parseFloat(e.target.value);
-                    console.log('Volume set to:', Math.round(video.volume * 100) + '%');
-                });
-                
-                // Set initial volume
-                video.volume = 1.0;
-                video.muted = false; // Unmute for Safari viewers with volume control
-            }
-        }
     </script>
 </body>
 </html>`;
