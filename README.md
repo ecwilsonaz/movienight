@@ -17,7 +17,7 @@ Synchronized video viewing for 20+ people with real-time monitoring and automati
 
 3. **Start server:**
    ```bash
-   node server.js
+   npm start
    ```
 
 4. **Share URLs:**
@@ -26,24 +26,12 @@ Synchronized video viewing for 20+ people with real-time monitoring and automati
 
 ## 🎬 Features
 
-### **Advanced Sync Technology**
-- **Real-time sync monitoring**: Live viewer status reporting every 2 seconds
-- **Automatic drift correction**: Detects and fixes sync issues within 5 seconds
-- **Network quality adaptation**: Adjusts sync tolerance based on connection quality
-- **Multi-layer reliability**: Real-time commands + periodic full state broadcasts
-- **Staleness detection**: Clear visibility into connection health
-
-### **Admin Controls**
-- **First-come admin protection**: Only one admin at a time, prevents conflicts
-- **Admin dashboard**: Press 'V' on server console for real-time viewer status
-- **Automatic reconnection**: Admin role reclaiming when admin disconnects
-- **Geographic tracking**: See viewer locations and connection quality
-
-### **Viewer Experience**
-- **Seamless sync**: Viewers automatically stay in sync with minimal interruption
-- **Connection indicators**: Visual feedback on network quality and sync status
-- **Buffering detection**: Smart handling of slow connections and loading states
-- **Late joiner sync**: New viewers automatically sync to current playback position
+- **Real-time sync**: 2-second monitoring with automatic drift correction
+- **Admin protection**: First-come admin access, one admin at a time
+- **Network adaptation**: Adjusts sync tolerance based on connection quality
+- **Live dashboard**: Press 'V' for real-time viewer status and geographic tracking
+- **Universal compatibility**: Works across all major browsers and devices
+- **Late joiner support**: New viewers automatically sync to current position
 
 ## 🌐 Universal Browser Compatibility
 
@@ -88,19 +76,19 @@ Use MP4/H.264 for all browsers:
 | **WebM** | ✅ | ❌ | ✅ | ✅ | Best compression |
 | **MP4/HEVC** | ⚠️ | ✅ | ❌ | ⚠️ | Safari native, others limited |
 
-### **Safari-Specific Features**
-- **Autoplay handling**: Interactive play button overlay
-- **Mobile optimization**: `playsinline` attribute for iOS
-- **Format preference**: Prioritizes HEVC for best quality
+### **Safari Optimizations**
+- Autoplay handling and mobile `playsinline` support
+- HEVC format preference for best quality
+- iOS-specific sync notifications and guidance
 
 #### **iOS Safari Sync Behavior**
-iOS Safari users may experience temporary sync adjustments when the admin pauses or seeks:
-- **Expected behavior**: Brief choppiness (2-3 seconds) during admin control changes
-- **Auto-stabilization**: Sync automatically stabilizes within 10 seconds
-- **Why this happens**: iOS Safari's enhanced video pipeline and power management optimizations
-- **User impact**: Minimal - viewing experience remains smooth overall
+iOS Safari users experience brief sync adjustments during admin controls:
+- **Expected behavior**: 5-10 seconds of choppiness when admin pauses/restarts
+- **Auto-stabilization**: Settles automatically
+- **Manual start required**: Users must tap play and unmute due to autoplay restrictions
+- **Best experience**: Use desktop browser for smoother playback
 
-> **Note**: iOS users will see a one-time notification explaining this behavior on first page load.
+> **Note**: iOS users see a notification with instructions and expectations on page load.
 
 ## 🚀 Production Deployment
 
@@ -240,11 +228,11 @@ nano session.json
 ufw allow 22 && ufw allow 80 && ufw allow 443 && ufw --force enable
 
 # Start server (consider using PM2 for production)
-node server.js
+npm start
 
 # For production, use process manager:
 npm install -g pm2
-pm2 start server.js --name movienight
+pm2 start "npm start" --name movienight
 pm2 startup
 pm2 save
 ```
@@ -272,43 +260,16 @@ pm2 save
 
 ## 🔧 Admin Features
 
-### **Role Management**
-- **First-come-first-served**: First person to access `?admin` URL becomes admin
-- **Protection**: Only one admin at a time, others become viewers
-- **Reconnection**: If admin disconnects, admin URL users can reclaim role
-- **Notifications**: Clear feedback when admin access is granted/denied
-
-### **Sync Controls**
-- **Manual controls**: Play, pause, seek - all broadcast to viewers
-- **Automatic monitoring**: Server detects out-of-sync viewers
-- **Targeted resync**: Only resyncs viewers who need it
-- **Reliability broadcasts**: Full state sync every 10 seconds as backup
+**Role Management**: First-come admin access, single admin protection, automatic role reclaiming
+**Sync Controls**: Manual play/pause/seek broadcast, automatic drift detection, targeted resyncing
+**Monitoring**: Real-time viewer status, network quality indicators, geographic tracking
 
 ## 🛠️ Troubleshooting
 
-### **Video Not Loading**
-1. **Check video format**: Multi-format setup provides best compatibility
-2. **Test direct access**: Visit video URLs directly to verify accessibility
-3. **Verify CORS headers**: Check nginx video serving configuration
-4. **Check file permissions**: Ensure nginx can read all video files
-5. **Browser compatibility**: Check browser console for format support errors
-
-### **Sync Issues**
-1. **Check admin dashboard**: Press 'V' to see viewer sync status
-2. **Network quality**: Poor connections get higher sync tolerance
-3. **Browser compatibility**: Some browsers handle video events differently
-4. **Connection stability**: Unstable connections may show frequent stale reports
-
-### **WebSocket Connection Issues**
-1. **Check nginx config**: Ensure WebSocket proxy configuration is correct
-2. **Firewall settings**: Verify ports 80/443 are open
-3. **SSL certificate**: Ensure valid certificate for WSS connections
-4. **Browser console**: Check for connection errors
-
-### **Admin Role Issues**
-1. **Multiple admins**: Only one admin allowed, others become viewers
-2. **Admin disconnection**: Use admin URL to reclaim role
-3. **Clear browser cache**: Old sessions might interfere
+**Video Not Loading**: Check video format compatibility, test direct URLs, verify CORS/permissions
+**Sync Issues**: Use admin dashboard ('V' key), check network quality, review browser console
+**WebSocket Issues**: Verify nginx config, firewall (ports 80/443), SSL certificate
+**Admin Problems**: Only one admin allowed, use admin URL to reclaim, clear browser cache
 
 ## 📋 Requirements
 
@@ -321,8 +282,8 @@ pm2 save
 
 ### **Local Development**
 ```bash
-# Start with local video file
-node server.js
+# Start server
+npm start
 # Access: http://localhost:3000/yourslug?admin
 ```
 
