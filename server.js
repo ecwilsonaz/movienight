@@ -523,7 +523,16 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                     heartbeatInterval: settings.heartbeatInterval + 1500, // Less frequent status reports
                     syncDelay: settings.syncDelay + 800                  // Longer delays for iOS video pipeline
                 };
-                console.log(\`iOS Safari: Using relaxed sync settings (tolerance: \${settings.tolerance}s, maxRetries: \${settings.maxRetries})\`);
+                
+                // Buffer-aware tolerance scaling: increase tolerance when buffer is low
+                const bufferHealth = getBufferHealth();
+                if (!bufferHealth.healthy && bufferHealth.bufferAhead < MIN_SAFE_BUFFER) {
+                    const bufferMultiplier = Math.max(1.5, (MIN_SAFE_BUFFER - bufferHealth.bufferAhead) / 2);
+                    settings.tolerance = settings.tolerance * bufferMultiplier;
+                    console.log('iOS Safari: Buffer-aware tolerance scaling (x' + bufferMultiplier.toFixed(1) + ') - tolerance now ' + settings.tolerance.toFixed(1) + 's');
+                }
+                
+                console.log('iOS Safari: Using relaxed sync settings (tolerance: ' + settings.tolerance.toFixed(1) + 's, maxRetries: ' + settings.maxRetries + ')');
             }
 
             return settings;
@@ -585,11 +594,14 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                 return;
             }
             
-            // iOS Safari buffer awareness - delay sync if buffering
-            if (isIOSSafari && isBuffering) {
-                console.log('iOS Safari: Delaying sync - video is buffering');
-                setTimeout(() => applySync(data, customSettings), 500);
-                return;
+            // iOS Safari buffer awareness - delay sync based on buffer health
+            if (isIOSSafari) {
+                const bufferHealth = getBufferHealth();
+                if (!bufferHealth.healthy) {
+                    console.log('iOS Safari: Delaying sync - buffer ' + bufferHealth.reason + ' (' + bufferHealth.bufferAhead.toFixed(1) + 's ahead)');
+                    setTimeout(() => applySync(data, customSettings), 500);
+                    return;
+                }
             }
             
             // iOS Safari power management - delay sync if suspended (with emergency override)
@@ -893,6 +905,34 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         // Buffer state monitoring (iOS Safari specific issues)
         let isBuffering = false;
         let bufferStartTime = null;
+        let lastBufferEndTime = null;
+        const BUFFER_GRACE_PERIOD = 2000; // 2 seconds after buffering ends
+        const MIN_SAFE_BUFFER = 2.5; // Minimum buffer ahead for safe syncing
+        
+        // Buffer health assessment for iOS Safari
+        function getBufferHealth() {
+            if (!isIOSSafari || video.buffered.length === 0) {
+                return { healthy: true, bufferAhead: 0, reason: 'no-buffer-data' };
+            }
+            
+            const currentTime = video.currentTime;
+            const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+            const bufferAhead = bufferedEnd - currentTime;
+            
+            // Check if we're in grace period after buffering
+            const inGracePeriod = lastBufferEndTime && (Date.now() - lastBufferEndTime < BUFFER_GRACE_PERIOD);
+            
+            const healthy = bufferAhead >= MIN_SAFE_BUFFER && !inGracePeriod && !isBuffering;
+            
+            return {
+                healthy,
+                bufferAhead,
+                inGracePeriod,
+                isBuffering,
+                reason: !healthy ? (isBuffering ? 'actively-buffering' : 
+                                   inGracePeriod ? 'grace-period' : 'low-buffer') : 'healthy'
+            };
+        }
         
         video.addEventListener('waiting', (e) => {
             if (!isBuffering) {
@@ -911,7 +951,8 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             if (isBuffering) {
                 const bufferDuration = Date.now() - bufferStartTime;
                 isBuffering = false;
-                console.log(\`✅ Video buffering ended after \${bufferDuration}ms (\${browser})\`);
+                lastBufferEndTime = Date.now(); // Track when buffering ended for grace period
+                console.log('✅ Video buffering ended after ' + bufferDuration + 'ms (' + browser + ')');
                 
                 // Restore normal status indicator
                 if (isIOSSafari) {
@@ -1313,8 +1354,27 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             if (!isAdmin && !syncInProgress) {
                 const settings = getAdaptiveSettings();
                 const timeDiff = Math.abs(video.currentTime - data.currentTime);
+                
                 if (timeDiff > settings.tolerance && !video.paused) {
-                    console.log(\`Heartbeat sync needed, drift: \${timeDiff.toFixed(1)}s (tolerance: \${settings.tolerance}s)\`);
+                    // Check buffer health for iOS Safari before syncing
+                    if (isIOSSafari) {
+                        const bufferHealth = getBufferHealth();
+                        
+                        if (!bufferHealth.healthy) {
+                            console.log('iOS Safari: Deferring heartbeat sync - buffer ' + bufferHealth.reason + ' (' + bufferHealth.bufferAhead.toFixed(1) + 's ahead, drift: ' + timeDiff.toFixed(1) + 's)');
+                            
+                            // Only defer if drift isn't extreme (>10s)
+                            if (timeDiff < 10) {
+                                return; // Skip this heartbeat sync
+                            } else {
+                                console.log('iOS Safari: FORCED heartbeat sync - extreme drift overrides buffer health');
+                            }
+                        } else {
+                            console.log('iOS Safari: Buffer healthy (' + bufferHealth.bufferAhead.toFixed(1) + 's ahead) - proceeding with heartbeat sync');
+                        }
+                    }
+                    
+                    console.log('Heartbeat sync needed, drift: ' + timeDiff.toFixed(1) + 's (tolerance: ' + settings.tolerance + 's)');
                     applySync({ type: 'seek', currentTime: data.currentTime, isPlaying: true });
                 }
             }
