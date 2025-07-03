@@ -1,6 +1,6 @@
 # Movie Night - Self-Hosted Watch Party
 
-Synchronized video viewing for 20+ people with real-time monitoring and automatic sync correction.
+Synchronized video viewing for 20+ people with real-time monitoring and automatic sync correction. Entirely vibe-coded with Claude Code.
 
 ## 🚀 Quick Setup
 
@@ -34,6 +34,8 @@ Synchronized video viewing for 20+ people with real-time monitoring and automati
 - **Late joiner support**: New viewers automatically sync to current position
 
 ## 🌐 Universal Browser Compatibility
+
+> **Recommendation**: Use **desktop browsers** for the best experience. iOS Safari is supported but may experience brief sync adjustments during admin controls.
 
 ### **Multi-Format Support (All Browsers)**
 The system now automatically detects browser capabilities and serves the optimal video format:
@@ -260,16 +262,16 @@ pm2 save
 
 ## 🔧 Admin Features
 
-**Role Management**: First-come admin access, single admin protection, automatic role reclaiming
-**Sync Controls**: Manual play/pause/seek broadcast, automatic drift detection, targeted resyncing
-**Monitoring**: Real-time viewer status, network quality indicators, geographic tracking
+- **Role Management**: First-come admin access, single admin protection, automatic role reclaiming
+- **Sync Controls**: Manual play/pause/seek broadcast, automatic drift detection, targeted resyncing
+- **Monitoring**: Real-time viewer status, network quality indicators, geographic tracking
 
 ## 🛠️ Troubleshooting
 
-**Video Not Loading**: Check video format compatibility, test direct URLs, verify CORS/permissions
-**Sync Issues**: Use admin dashboard ('V' key), check network quality, review browser console
-**WebSocket Issues**: Verify nginx config, firewall (ports 80/443), SSL certificate
-**Admin Problems**: Only one admin allowed, use admin URL to reclaim, clear browser cache
+- **Video Not Loading**: Check video format compatibility, test direct URLs, verify CORS/permissions
+- **Sync Issues**: Use admin dashboard ('V' key), check network quality, review browser console
+- **WebSocket Issues**: Verify nginx config, firewall (ports 80/443), SSL certificate
+- **Admin Problems**: Only one admin allowed, use admin URL to reclaim, clear browser cache
 
 ## 📋 Requirements
 
