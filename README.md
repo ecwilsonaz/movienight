@@ -1,6 +1,6 @@
-# Movie Night - Advanced Micro Watch Party
+# Movie Night - Self-Hosted Watch Party
 
-Ultra-reliable synchronized video viewing for 20+ people with real-time monitoring and automatic sync correction.
+Synchronized video viewing for 20+ people with real-time monitoring and automatic sync correction.
 
 ## 🚀 Quick Setup
 
