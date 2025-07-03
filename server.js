@@ -909,8 +909,14 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             let lastSeekBlock = 0;
             const SEEK_BLOCK_COOLDOWN = 100; // Max once per 100ms
             
+            // Frequency-based emergency bypass to prevent infinite loops
+            let seekBlockEvents = [];
+            const SEEK_BLOCK_FREQUENCY_WINDOW = 5000; // 5 second window
+            const SEEK_BLOCK_FREQUENCY_LIMIT = 10; // Max 10 blocks per window
+            let frequencyBypassActive = false;
+            
             video.addEventListener('seeking', (e) => {
-                if (!syncInProgress && !emergencyBypassActive) {
+                if (!syncInProgress && !emergencyBypassActive && !frequencyBypassActive) {
                     const now = Date.now();
                     
                     // Check for extreme drift - if drift >5 minutes, allow seeks to fix it
@@ -925,6 +931,27 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                     // Throttle seek blocking to prevent feedback loop
                     if (now - lastSeekBlock < SEEK_BLOCK_COOLDOWN) {
                         return; // Skip this event to break the loop
+                    }
+                    
+                    // Frequency-based emergency bypass monitoring
+                    seekBlockEvents.push(now);
+                    
+                    // Clean old events outside the window
+                    seekBlockEvents = seekBlockEvents.filter(timestamp => now - timestamp < SEEK_BLOCK_FREQUENCY_WINDOW);
+                    
+                    // Check if we're blocking too frequently
+                    if (seekBlockEvents.length >= SEEK_BLOCK_FREQUENCY_LIMIT) {
+                        console.log('🚨 FREQUENCY EMERGENCY BYPASS: Too many seek blocks (' + seekBlockEvents.length + ' in ' + SEEK_BLOCK_FREQUENCY_WINDOW + 'ms) - disabling seek blocking');
+                        frequencyBypassActive = true;
+                        
+                        // Re-enable after 10 seconds
+                        setTimeout(() => {
+                            frequencyBypassActive = false;
+                            seekBlockEvents = []; // Clear the event history
+                            console.log('✅ Frequency emergency bypass ended - seek blocking re-enabled');
+                        }, 10000);
+                        
+                        return; // Allow this seek to proceed
                     }
                     
                     // Clear any pending seek block
