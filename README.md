@@ -93,6 +93,15 @@ Use MP4/H.264 for all browsers:
 - **Mobile optimization**: `playsinline` attribute for iOS
 - **Format preference**: Prioritizes HEVC for best quality
 
+#### **iOS Safari Sync Behavior**
+iOS Safari users may experience temporary sync adjustments when the admin pauses or seeks:
+- **Expected behavior**: Brief choppiness (2-3 seconds) during admin control changes
+- **Auto-stabilization**: Sync automatically stabilizes within 10 seconds
+- **Why this happens**: iOS Safari's enhanced video pipeline and power management optimizations
+- **User impact**: Minimal - viewing experience remains smooth overall
+
+> **Note**: iOS users will see a one-time notification explaining this behavior on first page load.
+
 ## 🚀 Production Deployment
 
 ### 1. VPS Initial Setup

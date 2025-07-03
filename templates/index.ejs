@@ -43,6 +43,22 @@
     <div id="clickNotification" class="click-notification">Video controls reserved for admin</div>
     <% } %>
     
+    <% if (browser === 'ios-safari') { %>
+    <!-- iOS Sync Warning Banner -->
+    <div id="iosSyncWarning" class="ios-sync-warning">
+        <div class="ios-sync-warning-content">
+            <div class="ios-sync-warning-icon">ℹ️</div>
+            <div class="ios-sync-warning-text">
+                <div class="ios-sync-warning-title">iOS Sync Info</div>
+                <div class="ios-sync-warning-message">
+                    You may experience brief sync adjustments when the admin pauses or seeks. This will stabilize within 10 seconds.
+                </div>
+            </div>
+            <button class="ios-sync-warning-dismiss" onclick="dismissIOSWarning()" aria-label="Dismiss">×</button>
+        </div>
+    </div>
+    <% } %>
+    
     <script src="/socket.io/socket.io.js"></script>
     <script src="/js/networkMonitoring.js"></script>
     <script src="/js/videoSync.js"></script>
@@ -60,6 +76,15 @@
             optimalFormat: '<%= optimalVideo.format %>',
             startTime: <%= sessionConfig.startTime || 0 %>
         });
+        
+        // Make iOS warning dismiss function globally accessible
+        <% if (browser === 'ios-safari') { %>
+        function dismissIOSWarning() {
+            if (movieNightClient && typeof movieNightClient.dismissIOSWarning === 'function') {
+                movieNightClient.dismissIOSWarning();
+            }
+        }
+        <% } %>
     </script>
 </body>
 </html>

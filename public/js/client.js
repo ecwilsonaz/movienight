@@ -51,10 +51,54 @@ class MovieNightClient {
         // Initialize browser-specific handlers
         this.browserHandlers.init();
         
+        // Initialize iOS warning if applicable
+        if (this.isIOSSafari) {
+            this.initIOSWarning();
+        }
+        
         if (!this.isAdmin) {
             this.setupViewerControls();
         } else {
             this.setupAdminControls();
+        }
+    }
+    
+    initIOSWarning() {
+        const warningElement = document.getElementById('iosSyncWarning');
+        if (!warningElement) return;
+        
+        // Check if user has already dismissed this warning in this session
+        const warningDismissed = sessionStorage.getItem('iosSyncWarningDismissed');
+        
+        if (!warningDismissed) {
+            // Show warning after a brief delay to let page settle
+            setTimeout(() => {
+                warningElement.classList.add('show');
+            }, 1000);
+            
+            // Auto-hide after 15 seconds if not manually dismissed
+            setTimeout(() => {
+                if (warningElement.classList.contains('show')) {
+                    this.dismissIOSWarning();
+                }
+            }, 16000); // 1s delay + 15s display
+        }
+    }
+    
+    dismissIOSWarning() {
+        const warningElement = document.getElementById('iosSyncWarning');
+        if (warningElement) {
+            warningElement.classList.remove('show');
+            
+            // Store dismissal state for this session
+            sessionStorage.setItem('iosSyncWarningDismissed', 'true');
+            
+            // Remove element after animation completes
+            setTimeout(() => {
+                if (warningElement.parentNode) {
+                    warningElement.remove();
+                }
+            }, 400); // Match CSS transition duration
         }
     }
     
