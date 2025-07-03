@@ -375,7 +375,6 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
         let syncInProgress = false;
         let pendingSync = null;
         let videoReady = false;
-        let allowSeekEvents = false; // Flag to allow seek events (true = allow, false = block)
         
         // Browser detection
         const browser = '${browser}';
@@ -656,7 +655,6 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             const trySync = () => {
                 attempts++;
                 syncInProgress = true;
-                allowSeekEvents = true; // Allow seek events during sync operations
                 
                 console.log('Sync attempt ' + attempts + '/' + settings.maxRetries + ': ' + data.type + ' at ' + data.currentTime + 's (' + networkQuality + ')');
                 
@@ -674,12 +672,9 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                         const prepTime = Math.max(targetTime - 0.1, 0); // 100ms earlier, but not negative
                         video.currentTime = prepTime;
                         
-                        // Clear syncInProgress immediately for iOS Safari
-                        syncInProgress = false;
-                        
-                        // Re-enable seek blocking after iOS Safari operations settle
+                        // Clear syncInProgress after iOS Safari operations settle
                         setTimeout(() => {
-                            allowSeekEvents = false;
+                            syncInProgress = false;
                         }, 150); // Longer delay for iOS Safari
                         
                         // Step 2: Wait for seek to settle, then fine-tune position and play
@@ -723,12 +718,9 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
                         }
                     }
                     
-                    // Clear syncInProgress immediately after video operations
-                    syncInProgress = false;
-                    
-                    // Re-enable seek blocking after a brief delay to allow seek events to settle
+                    // Clear syncInProgress after a brief delay to allow seek events to settle
                     setTimeout(() => {
-                        allowSeekEvents = false;
+                        syncInProgress = false;
                     }, 50);
                 };
 
@@ -843,7 +835,7 @@ app.get(`/${sessionConfig.slug}`, (req, res) => {
             const SEEK_BLOCK_COOLDOWN = 100; // Max once per 100ms
             
             video.addEventListener('seeking', (e) => {
-                if (!syncInProgress && !allowSeekEvents) {
+                if (!syncInProgress) {
                     const now = Date.now();
                     
                     // Throttle seek blocking to prevent feedback loop
